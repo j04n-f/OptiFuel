@@ -44,6 +44,6 @@ uv run pre-commit install      # git hooks
 - **ty**: type checker (Astral), whole project. Any diagnostic fails. Editor: `ty server` LSP (VS Code "ty" extension).
 - **pytest** + **pytest-cov**.
 - **pre-commit**: ruff, ty, zizmor (GitHub Actions security audit; actions must be SHA-pinned), `uv.lock` sync check, file hygiene, private-key detection.
-- **GitHub Actions** (`.github/workflows/ci.yml`): pre-commit, tests, Docker build; actions pinned by commit SHA. **Dependabot** bumps uv deps, actions (SHA + version comment), Docker base image weekly, 7-day cooldown.
+- **GitHub Actions** (`.github/workflows/ci.yml`): pre-commit, tests, Docker build; actions pinned by commit SHA. **Dependabot** bumps uv deps, actions (SHA + version comment), Docker images (Dockerfile, Compose, and Helm chart postgres and WireMock pins) weekly, 7-day cooldown. `kindest/node` in `deploy/kind-smoke.sh` is updated by hand.
 
 Architecture, decisions, rejected alternatives, and implementation plan: [`ARCHITECTURE.md`](ARCHITECTURE.md).
