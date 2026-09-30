@@ -421,9 +421,11 @@ offline with fakes (tests red first).
    `pre-install` hook so it exists before the migrate hook. No Ingress template: the cluster's
    ingress fronts `optifuel-api`; the smoke port-forwards.
 9. **Kind smoke.** `deploy/kind-smoke.sh`: create cluster, install KEDA, build and load the image,
-   `helm install -f values-kind.yaml`, submit a plan, poll until `succeeded`, delete a worker pod
-   mid-run and confirm the job still completes. The stub is slowed to 3 s and the pod gets 1 s
-   to stop, so the job dies running; cleanup requeues it and it ends `succeeded` on attempt 2.
+   `helm install -f values-kind.yaml`, submit a plan, poll until `succeeded`. With the stub held
+   past the client timeout, 12 distinct ABC plans (targetQueueLength 10 plus the HPA's 10%
+   tolerance) scale `optifuel-worker-abc` past one replica. Delete a worker pod mid-run and
+   confirm the job still completes. The stub is slowed to 3 s and the pod gets 1 s to stop, so
+   the job dies running; cleanup requeues it and it ends `succeeded` on attempt 2.
    Last, `keda.enabled=false` leaves each worker at its min replicas.
 10. **Docs.** README command table: compose, kind smoke, worker command. CI stays three jobs; the
     Docker job builds the image and checks `/health`, the static page at `/`, and that

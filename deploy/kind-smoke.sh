@@ -118,6 +118,43 @@ step "submit a plan, poll until succeeded"
 id=$(submit "$flight")
 wait_for "$id" succeeded 60 | jq -c '{id, status, attempts, result}'
 
+step "KEDA scales worker-abc past 1 replica"
+# 12 clears the HPA 10% band (target+1 does not). A 60s delay exceeds the 5s client timeout, so
+# retries keep jobs todo until the HPA syncs; reset once spec>1, before the third attempt fails.
+n_jobs=12  # keda.targetQueueLength (10) + HPA 10% tolerance + 1; bump with values-kind.yaml
+curl -fsS -X POST "$STUB/__admin/settings" -d '{"fixedDelay": 60000}' >/dev/null
+scale_ids=()
+for ((i = 1; i <= n_jobs; i++)); do
+  # flight+1 is the pod-kill job below.
+  scale_ids+=("$(submit "$((flight + 1 + i))")")
+done
+scale_deadline=$((SECONDS + 180))
+ready=0
+spec=0
+delay_reset=0
+while ((SECONDS < scale_deadline)); do
+  spec=$(kubectl -n "$NS" get deployment optifuel-worker-abc -o jsonpath='{.spec.replicas}')
+  spec=${spec:-0}
+  ready=$(kubectl -n "$NS" get deployment optifuel-worker-abc -o jsonpath='{.status.readyReplicas}')
+  ready=${ready:-0}
+  # Scale-down waits out the HPA stabilization window, so the extra replica stays
+  # while its pod starts.
+  if ((delay_reset == 0 && spec > 1)); then
+    curl -fsS -X POST "$STUB/__admin/settings" -d '{"fixedDelay": 0}' >/dev/null
+    delay_reset=1
+  fi
+  ((ready > 1)) && break
+  sleep 2
+done
+echo "worker-abc readyReplicas=$ready specReplicas=$spec after $n_jobs jobs (target 10)"
+((ready > 1)) || { echo "worker-abc did not scale past 1 replica" >&2; exit 1; }
+if ((delay_reset == 0)); then
+  curl -fsS -X POST "$STUB/__admin/settings" -d '{"fixedDelay": 0}' >/dev/null
+fi
+for id in "${scale_ids[@]}"; do
+  wait_for "$id" succeeded 180 >/dev/null
+done
+
 step "kill the worker mid-job, job still succeeds"
 # The stub answers after 3 s (client timeout 5 s) and the pod gets 1 s to stop, so the job dies
 # running. Its heartbeat goes stale after 30 s; the cleanup CronJob's job requeues it.
