@@ -424,4 +424,5 @@ offline with fakes (tests red first).
    to stop, so the job dies running; cleanup requeues it and it ends `succeeded` on attempt 2.
    Last, `keda.enabled=false` leaves each worker at its min replicas.
 10. **Docs.** README command table: compose, kind smoke, worker command. CI stays three jobs; the
-    Docker job still builds the image and checks `/health`.
+    Docker job builds the image and checks `/health`, the static page at `/`, and that
+    `src/sql/schema.sql` is packaged.

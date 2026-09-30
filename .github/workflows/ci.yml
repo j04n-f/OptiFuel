@@ -83,6 +83,9 @@ jobs:
 
       - name: Smoke Test
         # Liveness needs no Postgres: the pool connects on first use, so a dummy URL is enough.
+        # /health stays green if uv_build drops the non-Python payloads (static mount, schema.sql).
         run: |
           docker run -d --name optifuel -p 8000:8000 -e OPTIFUEL_DATABASE_URL=postgresql://unused optifuel:ci
           curl --retry 10 --retry-all-errors --retry-delay 1 -fsS http://localhost:8000/health
+          curl -fsS http://localhost:8000/ | grep -q '<title>'
+          docker run --rm optifuel:ci python -c "from importlib.resources import files; files('src').joinpath('sql/schema.sql').read_text()"

@@ -38,7 +38,7 @@ Caveman. Technical substance stays, fluff dies.
 
 # Before pushing
 
-`README.md` is the command table; `pyproject.toml` holds every tool's config. Done means CI's three jobs pass locally: `uv run pre-commit run --all-files` (Lint: ruff, ty, zizmor, uv-lock, file hygiene), `uv run pytest` (Test), and the image builds and answers `/health` (Docker).
+`README.md` is the command table; `pyproject.toml` holds every tool's config. Done means CI's three jobs pass locally: `uv run pre-commit run --all-files` (Lint: ruff, ty, zizmor, uv-lock, file hygiene), `uv run pytest` (Test), and the image builds, answers `/health` and `/`, and ships `src/sql/schema.sql` (Docker).
 
 - **Warnings are errors** (`filterwarnings = ["error"]`). Fix a deprecation at its cause, the way `httpx2` replaced `httpx` for Starlette's `TestClient`; a warning filter needs the user's OK.
 - **Suppressions** name the rule and the reason: `# noqa: S301  provided dataset`, `# ty: ignore[<rule>]  <reason>`. ty is beta: a ty bump that adds diagnostics lands with its fixes.
