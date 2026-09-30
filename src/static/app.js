@@ -7,6 +7,9 @@ const SAMPLE = plan.value;
 const SVG = "http://www.w3.org/2000/svg";
 const RAD = Math.PI / 180;
 const STATUSES = ["succeeded", "running", "queued", "failed"];
+// List cap in controllers/jobs.py. Counts and fuel are this window, not all-time.
+const JOB_LIMIT = 100;
+for (const node of document.querySelectorAll(".job-window")) node.textContent = JOB_LIMIT;
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const rows = new Map();
 let current = "";
@@ -302,7 +305,7 @@ async function refresh() {
   if (!code) return;
   let list;
   try {
-    const response = await api("/v1/jobs");
+    const response = await api(`/v1/jobs?limit=${JOB_LIMIT}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     list = await response.json();
   } catch (error) {

@@ -70,12 +70,12 @@
 
       <section class="jobs" aria-labelledby="jobs-heading">
         <div class="jobs-head">
-          <h2 id="jobs-heading">Jobs <span id="board-airline" class="chip"></span></h2>
+          <h2 id="jobs-heading">Last <span class="job-window"></span> jobs <span id="board-airline" class="chip"></span></h2>
           <p id="link" class="live">Connecting…</p>
         </div>
 
         <dl class="stats">
-          <div class="fuel-stat"><dt>Estimated fuel</dt><dd><span id="fuel-total">0.0</span> <small>lb</small></dd></div>
+          <div class="fuel-stat"><dt>Estimated fuel, last <span class="job-window"></span> jobs</dt><dd><span id="fuel-total">0.0</span> <small>lb</small></dd></div>
           <div data-status="succeeded"><dt>Succeeded</dt><dd id="count-succeeded">0</dd></div>
           <div data-status="running"><dt>Running</dt><dd id="count-running">0</dd></div>
           <div data-status="queued"><dt>Queued</dt><dd id="count-queued">0</dd></div>
@@ -90,7 +90,7 @@
 
         <div class="table-wrap">
           <table>
-            <caption class="sr-only">Jobs, newest first, refreshed every 2 seconds</caption>
+            <caption class="sr-only">Last <span class="job-window"></span> jobs, newest first, refreshed every 2 seconds</caption>
             <thead>
               <tr>
                 <th scope="col">Job</th>
