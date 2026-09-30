@@ -156,8 +156,9 @@ sequenceDiagram
     A->>P: tx: defer to airline.ABC + insert job_records
     A-->>C: 202 {id}
     W->>P: claim (SKIP LOCKED), heartbeat
+    W->>W: envelope check
     W->>X: winds for waypoints + ETAs (1 call)
-    W->>W: envelope check, integrate fuel
+    W->>W: integrate fuel
     W->>P: update job_records.result, job → succeeded
     C->>A: GET /v1/jobs/{id}
     A->>P: job_records ⋈ procrastinate_jobs (airline = ABC)

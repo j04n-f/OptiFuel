@@ -12,7 +12,7 @@ from optifuel.config import Settings
 from optifuel.controllers.deps import get_clock, get_job_repository
 from optifuel.repositories.protocols import JobRepository
 from optifuel.schemas import FuelModel, FuelResult, JobSubmission, JobView
-from optifuel.services.fuel import FuelEstimateError, FuelService
+from optifuel.services.fuel import FuelService
 
 ABC_MODEL = FuelModel.model_validate(
     {
@@ -34,19 +34,22 @@ class FakeClock:
 
 
 class FakeWeather:
-    """Answers calm air for every point and records each batched call."""
+    """Answers calm air for every point, or raises `error` if set; records each batched call."""
 
     def __init__(self) -> None:
         self.calls: list[list[WindQuery]] = []
+        self.error: Exception | None = None
 
     def winds(self, points: Sequence[WindQuery]) -> list[Wind]:
         self.calls.append(list(points))
+        if self.error is not None:
+            raise self.error
         return [Wind(speed_kt=0, from_deg=0)] * len(points)
 
 
 class FakeJobs:
     """Job and result store in one dict; `submit` runs the airline's worker inline, like a queue
-    whose worker claims the job at once and fails it on a permanent error."""
+    whose worker claims the job at once and, with no retries configured, fails it on any error."""
 
     def __init__(self) -> None:
         self.jobs: dict[int, JobView] = {}
@@ -66,7 +69,7 @@ class FakeJobs:
         self.jobs[job.id] = job
         try:
             self.workers[plan.airline].estimate(job.id, plan)
-        except FuelEstimateError:
+        except Exception:  # Procrastinate fails the attempt on any exception
             job.status = "failed"
         else:
             job.status = "succeeded"

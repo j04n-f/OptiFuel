@@ -28,13 +28,19 @@ class FuelService:
         self._clock = clock
 
     def estimate(self, job_id: int, plan: FlightPlan) -> None:
-        """Record the result, or record the error and re-raise so the queue fails the job."""
-        if plan.departure_time is None:
-            raise ValueError("departure_time is set by JobService.submit before queueing")
+        """Record the result, or record the error and re-raise so the queue fails or retries."""
         try:
+            if plan.departure_time is None:
+                raise ValueError("departure_time is set by JobService.submit before queueing")
             result = self._estimate(plan.waypoints, plan.departure_time)
-        except FuelEstimateError as error:
-            self._results.record_error(job_id, str(error), self._clock.now())
+        except Exception as error:
+            # Every failed attempt, transient too: a job that exhausts its retries keeps its cause.
+            message = (
+                str(error)
+                if isinstance(error, FuelEstimateError)
+                else f"{type(error).__name__}: {error}"
+            )
+            self._results.record_error(job_id, message, self._clock.now())
             raise
         self._results.record_success(job_id, result, self._clock.now())
 

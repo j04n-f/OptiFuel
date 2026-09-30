@@ -83,6 +83,18 @@ def test_fails_out_of_envelope_plan(client: TestClient) -> None:
     assert job["error"] == "out_of_envelope: waypoints 1, 2"
 
 
+def test_records_error_when_weather_fails(client: TestClient, weather: FakeWeather) -> None:
+    weather.error = TimeoutError("weather API timed out")
+    plan = flight_plan(waypoint(0, 0, 200, 5000), waypoint(1, 0, 200, 5000))
+
+    submitted = client.post("/v1/jobs", json=plan)
+    job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
+
+    assert job["status"] == "failed"
+    assert job["result"] is None
+    assert job["error"] == "TimeoutError: weather API timed out"
+
+
 VALID = waypoint(0, 0, 200, 5000)
 
 
