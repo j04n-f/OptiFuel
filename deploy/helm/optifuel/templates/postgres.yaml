@@ -1,0 +1,57 @@
+{{- if .Values.postgres.enabled }}
+{{- $postgres := dict "root" $ "component" "postgres" }}
+{{- /* kind only. Pre-install hooks, so they exist before the migrate hook. ponytail: hooks sit
+outside the release and data lives in the container; production uses managed Postgres. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    {{- include "optifuel.labels" $postgres | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install
+    helm.sh/hook-weight: "-10"
+spec:
+  selector:
+    {{- include "optifuel.selector" $postgres | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    {{- include "optifuel.labels" $postgres | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install
+    helm.sh/hook-weight: "-10"
+spec:
+  serviceName: {{ .Release.Name }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "optifuel.selector" $postgres | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "optifuel.labels" $postgres | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: optifuel
+            - name: POSTGRES_DB
+              value: optifuel
+            {{- include "optifuel.secretEnv" (dict "root" $ "env" "POSTGRES_PASSWORD" "key" "postgres-password") | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, optifuel]
+            periodSeconds: 2
+{{- end }}

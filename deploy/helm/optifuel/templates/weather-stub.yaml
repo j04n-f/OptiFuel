@@ -1,0 +1,59 @@
+{{- if .Values.weatherStub.enabled }}
+{{- $weather := dict "root" $ "component" "weather" }}
+{{- /* kind only: stands in for the external weather API, as in docker-compose.yaml. */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-weather
+  labels:
+    {{- include "optifuel.labels" $weather | nindent 4 }}
+data:
+  winds.json: {{ required "weatherStub.mapping: pass the stub mapping with --set-file" .Values.weatherStub.mapping | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-weather
+  labels:
+    {{- include "optifuel.labels" $weather | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "optifuel.selector" $weather | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "optifuel.labels" $weather | nindent 8 }}
+    spec:
+      containers:
+        - name: weather
+          image: {{ .Values.weatherStub.image }}
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: mappings
+              mountPath: /home/wiremock/mappings
+              readOnly: true
+          readinessProbe:
+            httpGet: {path: /__admin/health, port: http}
+      volumes:
+        - name: mappings
+          configMap:
+            name: {{ .Release.Name }}-weather
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-weather
+  labels:
+    {{- include "optifuel.labels" $weather | nindent 4 }}
+spec:
+  selector:
+    {{- include "optifuel.selector" $weather | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}

@@ -1,0 +1,105 @@
+{{- $weatherUrl := .Values.weather.url }}
+{{- if .Values.weatherStub.enabled }}
+{{- $weatherUrl = printf "http://%s-weather:8080" .Release.Name }}
+{{- end }}
+{{- range $code, $t := .Values.tenants }}
+{{- $name := printf "%s-worker-%s" $.Release.Name (lower $code) }}
+{{- $worker := dict "root" $ "component" (printf "worker-%s" (lower $code)) }}
+{{- $model := required (printf "tenants.%s.model: pass the model file with --set-file" $code) $t.model }}
+{{- $min := $.Values.worker.minReplicas }}
+{{- if hasKey $t "minReplicas" }}{{ $min = $t.minReplicas }}{{ end }}
+{{- $max := $.Values.worker.maxReplicas }}
+{{- if hasKey $t "maxReplicas" }}{{ $max = $t.maxReplicas }}{{ end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-model
+  labels:
+    {{- include "optifuel.labels" $worker | nindent 4 }}
+data:
+  {{ $t.modelVersion }}.json: {{ $model | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "optifuel.labels" $worker | nindent 4 }}
+spec:
+  {{- if not $.Values.keda.enabled }}
+  replicas: {{ $min }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "optifuel.selector" $worker | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "optifuel.labels" $worker | nindent 8 }}
+      annotations:
+        # The worker reads its model once, at startup: a new model rolls the pods.
+        checksum/model: {{ $model | sha256sum }}
+    spec:
+      containers:
+        - name: worker
+          {{- include "optifuel.image" $ | nindent 10 }}
+          {{- include "optifuel.securityContext" $ | nindent 10 }}
+          command: [python, -m, src.worker]
+          env:
+            {{- include "optifuel.env" $ | nindent 12 }}
+            - name: OPTIFUEL_WORKER_AIRLINE
+              value: {{ $code | quote }}
+            - name: OPTIFUEL_WEATHER_URL
+              value: {{ required "weather.url is required unless weatherStub.enabled" $weatherUrl | quote }}
+            {{- include "optifuel.secretEnv" (dict "root" $ "env" "OPTIFUEL_WEATHER_TOKEN" "key" "weather-token") | nindent 12 }}
+          # This airline's model only: no other worker mounts it.
+          volumeMounts:
+            - name: model
+              mountPath: /models/{{ $code }}
+              readOnly: true
+          resources:
+            {{- toYaml $.Values.worker.resources | nindent 12 }}
+      volumes:
+        - name: model
+          configMap:
+            name: {{ $name }}-model
+{{- if $.Values.keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "optifuel.labels" $worker | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ $name }}
+  minReplicaCount: {{ $min }}
+  maxReplicaCount: {{ $max }}
+  triggers:
+    - type: postgresql
+      metadata:
+        # Queue name as `queue_name()` in src/repositories/postgres.py builds it: keep in step.
+        query: >-
+          SELECT count(*) FROM procrastinate_jobs
+          WHERE queue_name = 'airline.{{ $code }}' AND status IN ('todo', 'doing')
+        targetQueryValue: {{ $.Values.keda.targetQueueLength | quote }}
+      authenticationRef:
+        name: {{ $.Release.Name }}-postgres
+{{- end }}
+{{- end }}
+{{- if and .Values.keda.enabled .Values.tenants }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    {{- include "optifuel.labels" (dict "root" $ "component" "keda") | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: {{ .Values.secret.name }}
+      key: database-url
+{{- end }}

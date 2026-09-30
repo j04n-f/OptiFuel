@@ -1,0 +1,31 @@
+{{- $cleanup := dict "root" $ "component" "cleanup" }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-cleanup
+  labels:
+    {{- include "optifuel.labels" $cleanup | nindent 4 }}
+spec:
+  schedule: {{ .Values.cleanup.schedule | quote }}
+  # Two runs at once would both try to requeue the same stalled jobs.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "optifuel.labels" $cleanup | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: cleanup
+              {{- include "optifuel.image" . | nindent 14 }}
+              {{- include "optifuel.securityContext" . | nindent 14 }}
+              command: [python, -m, src.cleanup]
+              env:
+                {{- include "optifuel.env" . | nindent 16 }}
+                - name: OPTIFUEL_RETENTION_DAYS
+                  value: {{ .Values.cleanup.retentionDays | quote }}

@@ -414,8 +414,14 @@ offline with fakes (tests red first).
 8. **Helm.** `deploy/helm/optifuel`: API Deployment/Service/HPA, per-tenant worker Deployment +
    ConfigMap + ScaledObject (`keda.enabled`), migrate hook Job, cleanup CronJob, Secret refs.
    `values-kind.yaml` enables a Postgres StatefulSet (official image) and the WireMock stub.
+   The Secret is created outside the chart. Model files and the stub mapping enter with
+   `--set-file`, since a chart reads no file outside its directory. In-chart Postgres is a
+   `pre-install` hook so it exists before the migrate hook. No Ingress template: the cluster's
+   ingress fronts `optifuel-api`; the smoke port-forwards.
 9. **Kind smoke.** `deploy/kind-smoke.sh`: create cluster, install KEDA, build and load the image,
    `helm install -f values-kind.yaml`, submit a plan, poll until `succeeded`, delete a worker pod
-   mid-run and confirm the job still completes.
+   mid-run and confirm the job still completes. The stub is slowed to 3 s and the pod gets 1 s
+   to stop, so the job dies running; cleanup requeues it and it ends `succeeded` on attempt 2.
+   Last, `keda.enabled=false` leaves each worker at its min replicas.
 10. **Docs.** README command table: compose, kind smoke, worker command. CI stays three jobs; the
     Docker job still builds the image and checks `/health`.

@@ -1,0 +1,24 @@
+# kind smoke (`deploy/kind-smoke.sh`): image loaded into the node (tagged by the script), Postgres
+# and weather stub in the cluster. Models and the stub mapping come in with --set-file.
+image:
+  pullPolicy: Never
+
+environment: dev
+
+tenants:
+  ABC:
+    aircraftTypes: [B777]
+    modelVersion: "2026-09-30"
+  XYZ:
+    aircraftTypes: [A320]
+    modelVersion: "2026-09-30"
+
+api:
+  hpa:
+    minReplicas: 1
+
+postgres:
+  enabled: true
+
+weatherStub:
+  enabled: true

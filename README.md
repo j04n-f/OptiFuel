@@ -5,6 +5,7 @@ Technical test.
 - `exercise_1/`: fuel flow data analysis. `analysis.ipynb` (outputs committed) uses `cleanup.py`, `compute.py`, `plot.py`. Datasets: `signals_*.pkl`.
 - `src/`: OptiFuel job processor service (exercise 2), imported as package `src`.
 - `tests/`: pytest suite.
+- `deploy/`: Helm chart (`helm/optifuel`), kind smoke script, weather stub mapping.
 
 ## Setup
 
@@ -33,6 +34,8 @@ uv run pre-commit install      # git hooks
 | Migrate (Procrastinate schema + `job_records`) | `uv run python -m src.migrate` with `OPTIFUEL_DATABASE_URL` |
 | Cleanup (requeue jobs of dead workers, purge finished jobs after `OPTIFUEL_RETENTION_DAYS`, default 30) | `uv run python -m src.cleanup` with `OPTIFUEL_DATABASE_URL`; compose runs it every 5 minutes, once now with `docker compose run --rm cleanup python -m src.cleanup` |
 | Docker (API only; `/health` answers, `/ready` needs Postgres) | `docker build -t optifuel . && docker run --rm -p 8000:8000 -e OPTIFUEL_DATABASE_URL=postgresql://unused optifuel` |
+| Kind smoke (cluster + KEDA + chart with in-cluster Postgres and weather stub; plan succeeds, also after its worker pod is killed mid-run; `keda.enabled=false` keeps min replicas) | `deploy/kind-smoke.sh`; needs docker, kind, helm, kubectl, curl, jq, openssl. Deletes the cluster on exit; `KEEP_CLUSTER=1` keeps it and prints its kubeconfig |
+| Helm install (production values) | Create Secret `optifuel` (`database-url`, `weather-token`), then `helm install optifuel deploy/helm/optifuel -f <values> --set-file tenants.<CODE>.model=<model.json>` per tenant; values: `deploy/helm/optifuel/values.yaml` |
 
 ## Tooling
 

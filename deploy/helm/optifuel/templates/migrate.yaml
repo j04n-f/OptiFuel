@@ -1,0 +1,34 @@
+{{- $migrate := dict "root" $ "component" "migrate" }}
+# Hook: the schema is in place before any API or worker pod of this release starts.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate
+  labels:
+    {{- include "optifuel.labels" $migrate | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    # Kept after success too, so its logs stay readable until the next install or upgrade.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "optifuel.labels" $migrate | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- if .Values.postgres.enabled }}
+      # In-chart Postgres is a hook created just before this Job; wait until it accepts.
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ .Values.postgres.image }}
+          command: [sh, -c, "until pg_isready -h {{ .Release.Name }}-postgres -U optifuel; do sleep 1; done"]
+      {{- end }}
+      containers:
+        - name: migrate
+          {{- include "optifuel.image" . | nindent 10 }}
+          {{- include "optifuel.securityContext" . | nindent 10 }}
+          command: [python, -m, src.migrate]
+          env:
+            {{- include "optifuel.env" . | nindent 12 }}

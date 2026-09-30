@@ -1,0 +1,6 @@
+apiVersion: v2
+name: optifuel
+description: OptiFuel job processor. API, per-airline workers, migrate hook, cleanup CronJob.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
