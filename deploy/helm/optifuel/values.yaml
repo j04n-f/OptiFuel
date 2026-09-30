@@ -1,6 +1,10 @@
 image:
   repository: optifuel
+  # `tag: dev` is mutable and for local/kind only. Production sets `digest`
+  # (`docker buildx imagetools inspect`); renders `repository:tag@digest`. Empty keeps
+  # `repository:tag`.
   tag: dev
+  digest: ""
   pullPolicy: IfNotPresent
 
 environment: prod

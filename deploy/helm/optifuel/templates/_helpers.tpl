@@ -13,7 +13,7 @@ helm.sh/chart: {{ .root.Chart.Name }}-{{ .root.Chart.Version }}
 {{- end }}
 
 {{- define "optifuel.image" -}}
-image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
 imagePullPolicy: {{ .Values.image.pullPolicy }}
 {{- end }}
 
