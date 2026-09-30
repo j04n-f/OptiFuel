@@ -1,8 +1,9 @@
 # OptiFuel architecture
 
 OptiFuel receives airline flight plans as events, estimates route fuel with each airline's own
-model, and stores the result. This document holds the decisions, the design, and the
-implementation plan for exercise 2 (proof of concept, production-minded).
+model, and stores the result. This document describes the system as built: shape, decisions, job
+contract, data model, tenant isolation, fuel computation, seams, configuration, scaling and
+failure behaviour. Setup, commands and deployment steps: `README.md`.
 
 Guiding rule: least machinery that meets the brief. Every "not now" below names the trigger that
 would bring it in.
@@ -402,52 +403,21 @@ no build:
 | Weather cache | Weather API rate limits or cost |
 | Job cancel endpoint | Long-running job types |
 
-## 11. Repository layout
+## 11. Packaging
 
-Folder structure and layer rules: `AGENTS.md`, "Where it goes".
+One image ships every process (§7). Two ways to run it:
 
-## 12. Implementation plan
-
-Each step ends green on `uv run pre-commit run --all-files` and `uv run pytest`. Tests run
-offline with fakes (tests red first).
-
-1. **Dependencies.** `uv add procrastinate` (`pydantic-settings` landed with the skeleton), plus
-   the weather HTTP client as a runtime dep (`httpx2`, already in the lock for tests). Confirm the
-   Procrastinate atomic-defer API (§4).
-2. **Schemas and fuel service.** `FlightPlan`, model schema, envelope check, fuel integration.
-   Unit test only the integration math (headwind raises fuel versus calm air).
-3. **Config and seams.** Extend `Settings` and the `conftest.py` app fixture (both from the
-   skeleton); repository and client Protocols, fakes in `conftest.py`.
-4. **Controllers and job service.** Job routes, `current_airline`, rejections, `/ready`,
-   `/v1/tenants`, wired in `api.py`.
-   *Check (end-to-end):* one parametrized `test_rejects_invalid_submission` (401 / 403 / 422
-   cases) and `test_hides_other_airlines_jobs` (404).
-5. **Queue and worker.** Procrastinate app, `fuel_estimate` task with retry strategy, Postgres
-   repositories, `worker.py`, `migrate.py`, `cleanup.py`, `sql/schema.sql`.
-   *Check (end-to-end, POST then GET):* `test_estimates_route_fuel` (succeeded, fuel in body,
-   weather asked for every waypoint) and `test_fails_permanent_error_on_first_attempt`.
-6. **Static page.** `index.html` served at `/`.
-7. **Compose.** `docker-compose.yaml` (repo root): postgres (official image, tag+digest), migrate
-   (one-shot), api, worker-abc, worker-xyz (each mounts only its model), cleanup (a 5-minute loop
-   standing in for the CronJob), WireMock weather stub, and seed (one-shot, `scripts/seed.py`,
-   mounted since dev tooling stays out of the image): a fake `DEMO` tenant with no model or
-   worker, holding one job in each status so the page shows them all.
-   *Check:* `docker compose up`, submit via the page as ABC, see `succeeded`; ABC's job is 404 for
-   XYZ; DEMO lists queued, running, succeeded and failed.
-8. **Helm.** `deploy/helm/optifuel`: API Deployment/Service/HPA, per-tenant worker Deployment +
-   ConfigMap + ScaledObject (`keda.enabled`), migrate hook Job, cleanup CronJob, Secret refs.
-   `values-kind.yaml` enables a Postgres StatefulSet (official image) and the WireMock stub.
-   The Secret is created outside the chart. Model files and the stub mapping enter with
-   `--set-file`, since a chart reads no file outside its directory. In-chart Postgres is a
-   `pre-install` hook so it exists before the migrate hook. No Ingress template: the cluster's
-   ingress fronts `optifuel-api`; the smoke port-forwards.
-9. **Kind smoke.** `deploy/kind-smoke.sh`: create cluster, install KEDA, build and load the image,
-   `helm install -f values-kind.yaml`, submit a plan, poll until `succeeded`. With the stub held
-   past the client timeout, 12 distinct ABC plans (targetQueueLength 10 plus the HPA's 10%
-   tolerance) scale `optifuel-worker-abc` past one replica. Delete a worker pod mid-run and
-   confirm the job still completes. The stub is slowed to 3 s and the pod gets 1 s to stop, so
-   the job dies running; cleanup requeues it and it ends `succeeded` on attempt 2.
-   Last, `keda.enabled=false` leaves each worker at its min replicas.
-10. **Docs.** README command table: compose, kind smoke, worker command. CI stays three jobs; the
-    Docker job builds the image and checks `/health`, the static page at `/`, and that
-    `src/sql/schema.sql` is packaged.
+- **docker compose** (`docker-compose.yaml`, local): postgres (official image, tag + digest),
+  migrate (one-shot), api, worker-abc and worker-xyz (each mounts only its own model directory),
+  cleanup (a 5-minute loop standing in for the CronJob), a WireMock weather stub
+  (`deploy/weather-stub/`), and seed (one-shot, `scripts/seed.py` mounted since dev tooling stays
+  out of the image): a fake `DEMO` tenant with no model or worker, holding one job in each status
+  so the page shows them all.
+- **Helm** (`deploy/helm/optifuel`): API Deployment + Service + HPA, per-tenant worker Deployment +
+  model ConfigMap + ScaledObject (`keda.enabled`), migrate hook Job, cleanup CronJob, Secret
+  references. The Secret (`database-url`, `weather-token`) is created outside the chart. Model
+  files and the stub mapping enter with `--set-file`, since a chart reads no file outside its
+  directory. No Ingress template: the cluster's ingress fronts `optifuel-api`.
+  `values-kind.yaml` enables an in-chart Postgres StatefulSet, installed as a `pre-install` hook
+  so it exists before the migrate hook, and the WireMock stub; `deploy/kind-smoke.sh` exercises
+  the chart end to end on kind (§8 behaviours: backlog scaling, worker death mid-job, KEDA off).
