@@ -1,30 +1,17 @@
-from datetime import UTC, datetime
+from datetime import timedelta
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.conftest import FakeClock, FakeWeather
-
-DEPARTURE = datetime(2026, 9, 30, 10, 0, tzinfo=UTC)
-
-
-def flight_plan(*waypoints: dict[str, float], **overrides: object) -> dict[str, object]:
-    return {
-        "type": "fuel_estimate",
-        "payload": {
-            "airline": "ABC",
-            "aircraft_type": "B777",
-            "registration": "EC-ABC",
-            "flight_id": 123,
-            "departure_time": DEPARTURE.isoformat(),
-            "waypoints": list(waypoints),
-            **overrides,
-        },
-    }
-
-
-def waypoint(latitude: float, longitude: float, speed: float, altitude: float) -> dict[str, float]:
-    return {"latitude": latitude, "longitude": longitude, "speed": speed, "altitude": altitude}
+from tests.conftest import (
+    DEPARTURE,
+    IN_ENVELOPE,
+    FakeClock,
+    FakeWeather,
+    flight_plan,
+    waypoint,
+)
 
 
 def test_estimates_route_fuel(client: TestClient, weather: FakeWeather) -> None:
@@ -95,24 +82,71 @@ def test_records_error_when_weather_fails(client: TestClient, weather: FakeWeath
     assert job["error"] == "TimeoutError: weather API timed out"
 
 
-VALID = waypoint(0, 0, 200, 5000)
+V = IN_ENVELOPE
+ABC = {"X-Airline": "ABC"}
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    ("headers", "body", "status"),
     [
-        ("waypoints", [VALID]),
-        ("waypoints", [VALID, {**VALID, "latitude": 90.1}]),
-        ("waypoints", [VALID, {**VALID, "longitude": -180.1}]),
-        ("waypoints", [VALID, {**VALID, "speed": 0}]),
-        ("waypoints", [VALID, {**VALID, "altitude": -1}]),
-        ("departure_time", "2026-09-30T10:00:00"),
-        ("registration", ""),
+        pytest.param({}, flight_plan(V, V), 401, id="no airline header"),
+        pytest.param({"X-Airline": "QQQ"}, flight_plan(V, V), 401, id="unconfigured airline"),
+        pytest.param({"X-Airline": "XYZ"}, flight_plan(V, V), 403, id="other airline's plan"),
+        pytest.param(ABC, flight_plan(V, V, aircraft_type="A320"), 422, id="aircraft disabled"),
+        pytest.param(ABC, {**flight_plan(V, V), "type": "other"}, 422, id="unknown job type"),
+        pytest.param(ABC, flight_plan(V), 422, id="one waypoint"),
+        pytest.param(ABC, flight_plan(V, {**V, "latitude": 90.1}), 422, id="latitude"),
+        pytest.param(ABC, flight_plan(V, {**V, "longitude": -180.1}), 422, id="longitude"),
+        pytest.param(ABC, flight_plan(V, {**V, "speed": 0}), 422, id="speed"),
+        pytest.param(ABC, flight_plan(V, {**V, "altitude": -1}), 422, id="altitude"),
+        pytest.param(
+            ABC, flight_plan(V, V, departure_time="2026-09-30T10:00:00"), 422, id="naive time"
+        ),
+        pytest.param(ABC, flight_plan(V, V, registration=""), 422, id="registration"),
     ],
 )
-def test_rejects_invalid_flight_plan(client: TestClient, field: str, value: object) -> None:
-    plan = flight_plan(VALID, VALID, **{field: value})
+def test_rejects_invalid_submission(
+    app: FastAPI, weather: FakeWeather, headers: dict[str, str], body: object, status: int
+) -> None:
+    with TestClient(app, headers=headers) as client:
+        response = client.post("/v1/jobs", json=body)
 
-    response = client.post("/v1/jobs", json=plan)
+    assert response.status_code == status
+    assert weather.calls == []
 
-    assert response.status_code == 422
+
+@pytest.mark.parametrize(
+    ("first_departure", "again_departure"),
+    [
+        pytest.param("2026-09-30T10:00:00Z", "2026-09-30T10:00:00Z", id="same departure"),
+        pytest.param(None, None, id="departs when received"),
+        pytest.param("2026-09-30T10:00:00Z", "2026-09-30T12:00:00+02:00", id="same instant"),
+    ],
+)
+def test_returns_existing_job_for_resubmitted_plan(
+    client: TestClient,
+    weather: FakeWeather,
+    clock: FakeClock,
+    first_departure: str | None,
+    again_departure: str | None,
+) -> None:
+    first = client.post("/v1/jobs", json=flight_plan(V, V, departure_time=first_departure))
+    clock.current += timedelta(hours=1)
+
+    again = client.post("/v1/jobs", json=flight_plan(V, V, departure_time=again_departure))
+
+    assert again.status_code == 202
+    assert again.json() == first.json()
+    assert len(weather.calls) == 1
+
+
+def test_queues_new_job_when_same_plan_failed(client: TestClient, weather: FakeWeather) -> None:
+    plan = flight_plan(V, V)
+    weather.error = TimeoutError("weather API timed out")
+    failed = client.post("/v1/jobs", json=plan).json()["id"]
+    weather.error = None
+
+    again = client.post("/v1/jobs", json=plan).json()["id"]
+
+    assert again != failed
+    assert client.get(f"/v1/jobs/{again}").json()["status"] == "succeeded"

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 
 from optifuel.clients.clock import SystemClock
 from optifuel.config import Settings
-from optifuel.controllers import health, jobs
+from optifuel.controllers import health, jobs, tenants
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -14,6 +14,7 @@ def create_app(settings: Settings) -> FastAPI:
     # repository (Procrastinate defer + job_records) lands as `app.state.jobs` here.
     app.include_router(health.router)
     app.include_router(jobs.router)
+    app.include_router(tenants.router)
     return app
 
 

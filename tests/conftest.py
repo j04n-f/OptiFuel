@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from optifuel.api import create_app
 from optifuel.clients.clock import Clock
 from optifuel.clients.weather import Wind, WindQuery
-from optifuel.config import Settings
+from optifuel.config import Settings, Tenant
 from optifuel.controllers.deps import get_clock, get_job_repository
 from optifuel.repositories.protocols import JobRepository
 from optifuel.schemas import FuelModel, FuelResult, JobSubmission, JobView
@@ -23,6 +23,31 @@ ABC_MODEL = FuelModel.model_validate(
         "envelope": {"speed_kmh": [24, 238], "altitude_ft": [1000, 10000]},
     }
 )
+XYZ_MODEL = ABC_MODEL.model_copy(update={"airline": "XYZ"})
+DEPARTURE = datetime(2026, 9, 30, 10, 0, tzinfo=UTC)
+
+
+def flight_plan(*waypoints: dict[str, float], **overrides: object) -> dict[str, object]:
+    """`POST /v1/jobs` body for an ABC B777; `overrides` replace payload fields."""
+    return {
+        "type": "fuel_estimate",
+        "payload": {
+            "airline": "ABC",
+            "aircraft_type": "B777",
+            "registration": "EC-ABC",
+            "flight_id": 123,
+            "departure_time": DEPARTURE.isoformat(),
+            "waypoints": list(waypoints),
+            **overrides,
+        },
+    }
+
+
+def waypoint(latitude: float, longitude: float, speed: float, altitude: float) -> dict[str, float]:
+    return {"latitude": latitude, "longitude": longitude, "speed": speed, "altitude": altitude}
+
+
+IN_ENVELOPE = waypoint(0, 0, 200, 5000)
 
 
 class FakeClock:
@@ -54,8 +79,9 @@ class FakeJobs:
     def __init__(self) -> None:
         self.jobs: dict[int, JobView] = {}
         self.workers: dict[str, FuelService] = {}
+        self.plan_keys: dict[int, str] = {}
 
-    def submit(self, submission: JobSubmission, submitted_at: datetime) -> int:
+    def submit(self, submission: JobSubmission, plan_key: str, submitted_at: datetime) -> int:
         plan = submission.payload
         job = JobView(
             id=len(self.jobs) + 1,
@@ -67,6 +93,7 @@ class FakeJobs:
             submitted_at=submitted_at,
         )
         self.jobs[job.id] = job
+        self.plan_keys[job.id] = plan_key
         try:
             self.workers[plan.airline].estimate(job.id, plan)
         except Exception:  # Procrastinate fails the attempt on any exception
@@ -75,8 +102,17 @@ class FakeJobs:
             job.status = "succeeded"
         return job.id
 
-    def get(self, job_id: int) -> JobView | None:
-        return self.jobs.get(job_id)
+    def latest(self, airline: str, plan_key: str) -> JobView | None:
+        newest_first = self.recent(airline, limit=len(self.jobs))
+        return next((job for job in newest_first if self.plan_keys[job.id] == plan_key), None)
+
+    def get(self, airline: str, job_id: int) -> JobView | None:
+        job = self.jobs.get(job_id)
+        return job if job is not None and job.airline == airline else None
+
+    def recent(self, airline: str, limit: int) -> list[JobView]:
+        own = [job for job in self.jobs.values() if job.airline == airline]
+        return sorted(own, key=lambda job: (job.submitted_at, job.id), reverse=True)[:limit]
 
     def record_success(self, job_id: int, result: FuelResult, finished_at: datetime) -> None:
         job = self.jobs[job_id]
@@ -101,6 +137,7 @@ def weather() -> FakeWeather:
 def jobs(clock: FakeClock, weather: FakeWeather) -> FakeJobs:
     jobs = FakeJobs()
     jobs.workers["ABC"] = FuelService(ABC_MODEL, weather, jobs, clock)
+    jobs.workers["XYZ"] = FuelService(XYZ_MODEL, weather, jobs, clock)
     return jobs
 
 
@@ -113,7 +150,11 @@ def app(clock: FakeClock, jobs: FakeJobs) -> FastAPI:
     def fake_jobs() -> JobRepository:
         return jobs
 
-    app = create_app(Settings(environment="dev"))
+    tenants = {
+        "ABC": Tenant(aircraft_types=frozenset({"B777"})),
+        "XYZ": Tenant(aircraft_types=frozenset({"A320"})),
+    }
+    app = create_app(Settings(environment="dev", tenants=tenants))
     app.dependency_overrides[get_clock] = fake_clock
     app.dependency_overrides[get_job_repository] = fake_jobs
     return app
@@ -121,5 +162,6 @@ def app(clock: FakeClock, jobs: FakeJobs) -> FastAPI:
 
 @pytest.fixture
 def client(app: FastAPI) -> Iterator[TestClient]:
-    with TestClient(app) as client:
+    """Calls as ABC; pass `headers=` per request to act as another airline."""
+    with TestClient(app, headers={"X-Airline": "ABC"}) as client:
         yield client

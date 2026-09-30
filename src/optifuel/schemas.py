@@ -1,7 +1,14 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+)
 
 
 class Waypoint(BaseModel):
@@ -14,6 +21,8 @@ class Waypoint(BaseModel):
 
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+# One form per instant, so the same plan sent with another UTC offset hashes to one plan_key.
+UtcDatetime = Annotated[AwareDatetime, AfterValidator(lambda t: t.astimezone(UTC))]
 
 
 class FlightPlan(BaseModel):
@@ -21,7 +30,7 @@ class FlightPlan(BaseModel):
     aircraft_type: NonEmpty
     registration: NonEmpty
     flight_id: int
-    departure_time: AwareDatetime | None = Field(
+    departure_time: UtcDatetime | None = Field(
         default=None, description="Defaults to the time the job is received"
     )
     waypoints: list[Waypoint] = Field(min_length=2)

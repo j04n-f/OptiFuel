@@ -260,7 +260,7 @@ hand in fakes:
 
 | Seam | Real implementation | Used by |
 |---|---|---|
-| `JobRepository`: `submit`, `get`, `list` | Procrastinate defer + SQL on `job_records ⋈ procrastinate_jobs` | Job service (API) |
+| `JobRepository`: `submit`, `latest`, `get`, `recent` (each scoped to one airline) | Procrastinate defer + SQL on `job_records ⋈ procrastinate_jobs` | Job service (API) |
 | `ResultRepository`: `record_success`, `record_error` | SQL on `job_records` | Fuel service (worker) |
 | `ModelRepository`: `load(airline, version)` | JSON file under `OPTIFUEL_MODEL_DIR` | Worker startup: loads its airline's model once and hands it to the fuel service |
 | `WeatherClient`: `winds(points)` | HTTP client, bearer token, 5 s timeout | Fuel service (worker) |

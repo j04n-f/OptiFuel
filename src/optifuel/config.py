@@ -1,6 +1,11 @@
 from typing import Literal
 
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Tenant(BaseModel):
+    aircraft_types: frozenset[str]
 
 
 class Settings(BaseSettings):
@@ -9,3 +14,5 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="OPTIFUEL_")
 
     environment: Literal["dev", "prod"] = "dev"
+    # JSON, keyed by airline code. Empty rejects every caller: no tenant, no default.
+    tenants: dict[str, Tenant] = {}
