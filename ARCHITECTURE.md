@@ -261,11 +261,11 @@ hand in fakes:
 |---|---|---|
 | `JobRepository`: `submit`, `get`, `list` | Procrastinate defer + SQL on `job_records ⋈ procrastinate_jobs` | Job service (API) |
 | `ResultRepository`: `record_success`, `record_error` | SQL on `job_records` | Fuel service (worker) |
-| `ModelRepository`: `load(airline, version)` | JSON file under `OPTIFUEL_MODEL_DIR`, cached per process | Fuel service (worker) |
+| `ModelRepository`: `load(airline, version)` | JSON file under `OPTIFUEL_MODEL_DIR` | Worker startup: loads its airline's model once and hands it to the fuel service |
 | `WeatherClient`: `winds(points)` | HTTP client, bearer token, 5 s timeout | Fuel service (worker) |
 | `Clock`: `now()` | `datetime.now(UTC)` | Job and fuel services |
 
-Job pipeline: `validate → fetch winds → check envelope → integrate → persist`. Each step is a
+Job pipeline: `validate → check envelope → fetch winds → integrate → persist`. Each step is a
 plain function. A new filter is one more function in the list. A new job type is one registry
 entry (`type → payload model + Procrastinate task`). A new model family is one loader keyed by
 `form`.
