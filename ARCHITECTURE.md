@@ -100,7 +100,7 @@ Job view:
   "id": 42, "type": "fuel_estimate", "airline": "ABC", "flight_id": 123,
   "status": "succeeded", "attempts": 1,
   "submitted_at": "2026-09-30T10:00:00Z", "finished_at": "2026-09-30T10:00:01Z",
-  "result": {"total_fuel_lb": 1234.5, "distance_km": 812.3, "duration_h": 3.9,
+  "result": {"total_fuel_lb": 10.9, "distance_km": 812.3, "duration_h": 3.9,
              "model_version": "2026-09-30"},
   "error": null
 }
@@ -223,6 +223,11 @@ $$ff = e^{12.75644}\, v^{0.99981}\, h^{-1.99903} \approx 346\,600 \cdot \frac{v}
 
 `ff` in lb/h, `v` = true airspeed in km/h, `h` in ft. Validated only for 24–238 km/h and
 1000–10 000 ft.
+
+The coefficients come from the simulated dataset, whose fuel flow is 0.08–84 lb/h where a real
+airliner burns thousands. Estimates are faithful to that data (median model/data ratio 1.00) and
+compare routes correctly, but are not real-world pounds: a 93 km hop at 200 km/h and 5000 ft
+comes out at 1.2 lb.
 
 Model file (`models/ABC/2026-09-30.json`):
 
