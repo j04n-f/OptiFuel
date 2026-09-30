@@ -82,6 +82,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Smoke Test
+        # Liveness needs no Postgres: the pool connects on first use, so a dummy URL is enough.
         run: |
-          docker run -d --name optifuel -p 8000:8000 optifuel:ci
+          docker run -d --name optifuel -p 8000:8000 -e OPTIFUEL_DATABASE_URL=postgresql://unused optifuel:ci
           curl --retry 10 --retry-all-errors --retry-delay 1 -fsS http://localhost:8000/health

@@ -1,4 +1,7 @@
+import pytest
 from fastapi.testclient import TestClient
+
+from tests.conftest import FakeJobs
 
 
 def test_reports_process_up(client: TestClient) -> None:
@@ -6,3 +9,14 @@ def test_reports_process_up(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.parametrize(("database_up", "status"), [(True, 200), (False, 503)])
+def test_reports_ready_only_when_database_answers(
+    client: TestClient, jobs: FakeJobs, database_up: bool, status: int
+) -> None:
+    jobs.database_up = database_up
+
+    response = client.get("/ready")
+
+    assert response.status_code == status

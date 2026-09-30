@@ -32,6 +32,9 @@ class JobService:
             raise UnknownAirlineError(f"unknown airline: {airline!r}")
         return airline
 
+    def ready(self) -> bool:
+        return self._jobs.ping()
+
     def submit(self, airline: str, submission: JobSubmission) -> int:
         plan = submission.payload
         if plan.airline != airline:

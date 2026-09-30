@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/winds",
+    "headers": {"Authorization": {"matches": "Bearer .+"}}
+  },
+  "response": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"winds\": [{{#each (jsonPath request.body '$.points')}}{{#unless @first}}, {{/unless}}{\"speed_kt\": 10, \"from_deg\": 270}{{/each}}]}",
+    "transformers": ["response-template"]
+  }
+}

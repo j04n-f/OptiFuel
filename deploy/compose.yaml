@@ -1,0 +1,74 @@
+# Local stack: `docker compose -f deploy/compose.yaml up --build`. Secrets default to dev values;
+# override them in `deploy/.env` (gitignored).
+name: optifuel
+
+x-app: &app
+  build: ..
+  image: optifuel:dev
+  environment: &env
+    OPTIFUEL_DATABASE_URL: postgresql://optifuel:${POSTGRES_PASSWORD:-optifuel}@postgres:5432/optifuel
+    OPTIFUEL_TENANTS: >-
+      {"ABC": {"aircraft_types": ["B777"], "model_version": "2026-09-30"},
+       "XYZ": {"aircraft_types": ["A320"], "model_version": "2026-09-30"}}
+  depends_on: &migrated
+    migrate:
+      condition: service_completed_successfully
+
+x-worker-env: &worker-env
+  <<: *env
+  OPTIFUEL_WEATHER_URL: http://weather:8080
+  OPTIFUEL_WEATHER_TOKEN: ${OPTIFUEL_WEATHER_TOKEN:-dev-token}
+
+services:
+  postgres:
+    image: postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_USER: optifuel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-optifuel}
+      POSTGRES_DB: optifuel
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "optifuel"]
+      interval: 2s
+      retries: 15
+
+  migrate:
+    <<: *app
+    command: ["python", "-m", "optifuel.migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    restart: unless-stopped
+    ports: ["8000:8000"]
+
+  # Each worker mounts only its own airline's model directory.
+  worker-abc:
+    <<: *app
+    restart: unless-stopped
+    command: ["python", "-m", "optifuel.worker"]
+    environment:
+      <<: *worker-env
+      OPTIFUEL_WORKER_AIRLINE: ABC
+    volumes: ["../models/ABC:/models/ABC:ro"]
+    depends_on: &worker-deps
+      <<: *migrated
+      weather:
+        condition: service_started
+
+  worker-xyz:
+    <<: *app
+    restart: unless-stopped
+    command: ["python", "-m", "optifuel.worker"]
+    environment:
+      <<: *worker-env
+      OPTIFUEL_WORKER_AIRLINE: XYZ
+    volumes: ["../models/XYZ:/models/XYZ:ro"]
+    depends_on: *worker-deps
+
+  # Stands in for the external weather API: 10 kt from the west at every point.
+  weather:
+    # Not -alpine: that variant is amd64-only.
+    image: wiremock/wiremock:3.13.2@sha256:0d4ecb3e4dc8213fd7a4d37d6a78f6e6b553a6d2e15bd51b0999781282ac61b3
+    volumes: ["./weather-stub:/home/wiremock:ro"]

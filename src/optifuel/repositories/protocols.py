@@ -7,6 +7,10 @@ from optifuel.schemas import FuelResult, JobSubmission, JobView
 class JobRepository(Protocol):
     """Every read is scoped to one airline: another airline's job does not exist for it."""
 
+    def ping(self) -> bool:
+        """Whether the store answers now: readiness, not liveness."""
+        ...
+
     def submit(self, submission: JobSubmission, plan_key: str, submitted_at: datetime) -> int:
         """Queue the job and record it; returns the job id. A concurrent submit with the same
         airline and `plan_key` returns the job the other one queued."""

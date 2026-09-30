@@ -1,0 +1,20 @@
+{
+  "airline": "XYZ",
+  "version": "2026-09-30",
+  "form": "power_law",
+  "coefficients": {
+    "ln_c": 12.75644,
+    "speed": 0.99981,
+    "altitude": -1.99903
+  },
+  "envelope": {
+    "speed_kmh": [
+      24,
+      238
+    ],
+    "altitude_ft": [
+      1000,
+      10000
+    ]
+  }
+}

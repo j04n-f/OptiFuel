@@ -189,13 +189,14 @@ CREATE INDEX IF NOT EXISTS job_records_plan ON job_records (airline, plan_key);
 
 - Status has one source: `procrastinate_jobs.status`. Payload, outcome and timestamps come from
   `job_records`.
-- Job args: `{"job_type": "fuel_estimate", "flight_plan": {...}}`. Queue: `airline.<CODE>`.
+- Job args: `{"flight_plan": {...}}`; the Procrastinate task name is the job type
+  (`fuel_estimate`). Queue: `airline.<CODE>`.
 - The worker writes `error` on every failed attempt, so a job that fails for good keeps its last
   error. Success writes `result` and clears `error`.
 - `remove_old_jobs` deletes old jobs; `ON DELETE CASCADE` removes their records.
-- The API writes `job_records` in the same transaction as the defer. This relies on Procrastinate
-  ≥ 3.8 accepting an external connection when deferring (per its release notes, confirm while
-  implementing).
+- The API writes `job_records` in the same transaction as the defer:
+  `App.configure_task(..., connection=conn).defer(...)` (Procrastinate 3.10) runs the job insert
+  on the API's own connection, inside its transaction.
 
 ## 5. Tenant isolation
 
@@ -260,10 +261,10 @@ hand in fakes:
 
 | Seam | Real implementation | Used by |
 |---|---|---|
-| `JobRepository`: `submit`, `latest`, `get`, `recent` (each scoped to one airline) | Procrastinate defer + SQL on `job_records ⋈ procrastinate_jobs` | Job service (API) |
+| `JobRepository`: `ping`, `submit`, `latest`, `get`, `recent` (reads scoped to one airline) | Procrastinate defer + SQL on `job_records ⋈ procrastinate_jobs` | Job service (API) |
 | `ResultRepository`: `record_success`, `record_error` | SQL on `job_records` | Fuel service (worker) |
-| `ModelRepository`: `load(airline, version)` | JSON file under `OPTIFUEL_MODEL_DIR` | Worker startup: loads its airline's model once and hands it to the fuel service |
-| `WeatherClient`: `winds(points)` | HTTP client, bearer token, 5 s timeout | Fuel service (worker) |
+| `FileModelRepository`: `load(airline, version)`, concrete; the Protocol lands with a second source (§10) | JSON file under `OPTIFUEL_MODEL_DIR` | Worker startup: loads its airline's model once and hands it to the fuel service |
+| `WeatherClient`: `winds(points)` | HTTP client, bearer token, 5 s timeout: `POST /winds` `{"points": [{latitude, longitude, altitude_ft, eta}]}` → `{"winds": [{speed_kt, from_deg}]}` | Fuel service (worker) |
 | `Clock`: `now()` | `datetime.now(UTC)` | Job and fuel services |
 
 Job pipeline: `validate → check envelope → fetch winds → integrate → persist`. Each step is a
@@ -293,7 +294,7 @@ ConfigMaps.
 
 | Process | Command | Kubernetes object |
 |---|---|---|
-| API | `uvicorn optifuel.api:app` (image default) | Deployment + Service + HPA (CPU) |
+| API | `uvicorn --factory optifuel.api:from_env` (image default) | Deployment + Service + HPA (CPU) |
 | Worker | `python -m optifuel.worker` | Deployment per airline + KEDA ScaledObject |
 | Migrate | `python -m optifuel.migrate` | Job, Helm `pre-install,pre-upgrade` hook |
 | Cleanup | `python -m optifuel.cleanup` | CronJob `*/5 * * * *` |

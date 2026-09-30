@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from optifuel.api import create_app
 from optifuel.clients.clock import Clock
@@ -80,6 +81,10 @@ class FakeJobs:
         self.jobs: dict[int, JobView] = {}
         self.workers: dict[str, FuelService] = {}
         self.plan_keys: dict[int, str] = {}
+        self.database_up = True
+
+    def ping(self) -> bool:
+        return self.database_up
 
     def submit(self, submission: JobSubmission, plan_key: str, submitted_at: datetime) -> int:
         plan = submission.payload
@@ -151,10 +156,12 @@ def app(clock: FakeClock, jobs: FakeJobs) -> FastAPI:
         return jobs
 
     tenants = {
-        "ABC": Tenant(aircraft_types=frozenset({"B777"})),
-        "XYZ": Tenant(aircraft_types=frozenset({"A320"})),
+        "ABC": Tenant(aircraft_types=frozenset({"B777"}), model_version="2026-09-30"),
+        "XYZ": Tenant(aircraft_types=frozenset({"A320"}), model_version="2026-09-30"),
     }
-    app = create_app(Settings(environment="dev", tenants=tenants))
+    # Builds the real pool, which never connects: min_size=0 and the repository is overridden.
+    database_url = SecretStr("postgresql://unused")
+    app = create_app(Settings(environment="dev", database_url=database_url, tenants=tenants))
     app.dependency_overrides[get_clock] = fake_clock
     app.dependency_overrides[get_job_repository] = fake_jobs
     return app
