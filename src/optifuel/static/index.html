@@ -4,68 +4,45 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>OptiFuel · Dispatch</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath d='M24 3C24 3 9 20 9 30a15 15 0 0 0 30 0C39 20 24 3 24 3Z' fill='%23ffb627'/%3E%3C/svg%3E">
+  <title>OptiFuel</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath d='M24 3C24 3 9 20 9 30a15 15 0 0 0 30 0C39 20 24 3 24 3Z' fill='%236aa8ff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
 </head>
 <body>
-  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
-    <symbol id="plane" viewBox="-14 -12 28 24">
-      <path d="M13 0c0-1.2-2-2-4-2H3L-4-11h-3l5 9h-6l-3-4h-2l1.5 6L-13 6h2l3-4h6l-5 9h3l7-9h6c2 0 4-.8 4-2Z"/>
-    </symbol>
-  </svg>
-
   <div class="shell">
     <header class="top">
       <div class="brand">
-        <svg class="logo" viewBox="0 0 48 48" aria-hidden="true">
-          <defs>
-            <linearGradient id="logo-fill" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" style="stop-color: var(--amber)"/>
-              <stop offset="1" style="stop-color: var(--accent)"/>
-            </linearGradient>
-          </defs>
-          <path d="M24 3C24 3 9 20 9 30a15 15 0 0 0 30 0C39 20 24 3 24 3Z" fill="url(#logo-fill)"/>
-          <use href="#plane" x="11" y="19" width="26" height="22" fill="#07101f" transform="rotate(-30 24 30)"/>
-        </svg>
-        <div>
-          <h1>Opti<span>Fuel</span></h1>
-          <p class="tagline">Route fuel estimates, one airline at a time</p>
-        </div>
+        <svg class="mark" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 3C24 3 9 20 9 30a15 15 0 0 0 30 0C39 20 24 3 24 3Z"/></svg>
+        <h1>OptiFuel</h1>
+        <span class="brand-sub">Route fuel estimates</span>
       </div>
-
       <fieldset class="airlines">
         <legend>Airline</legend>
-        <div id="airlines" class="tags"></div>
+        <div id="airlines" class="segmented"></div>
       </fieldset>
-
-      <p class="clock"><time id="clock">--:--:--</time> <abbr title="Coordinated Universal Time">UTC</abbr></p>
     </header>
 
     <main>
-      <section class="sheet-wrap" aria-labelledby="plan-heading">
-        <form id="submit-form" class="sheet">
-          <p class="step"><span class="step-no">01</span> File</p>
-          <h2 id="plan-heading">Flight plan</h2>
-          <p id="stamp" class="stamp" aria-hidden="true">Ready</p>
+      <form id="submit-form" class="plan" aria-labelledby="plan-heading">
+        <h2 id="plan-heading">Flight plan</h2>
 
-          <figure class="chart">
-            <svg id="route" viewBox="0 0 640 300" role="img" aria-label="Route map"></svg>
-            <svg id="profile" viewBox="0 0 640 120" role="img" aria-label="Altitude profile"></svg>
-          </figure>
+        <figure class="chart">
+          <svg id="route" viewBox="0 0 640 300" role="img" aria-label="Route map"></svg>
+          <svg id="profile" viewBox="0 0 640 110" role="img" aria-label="Altitude profile"></svg>
+        </figure>
 
-          <dl class="summary">
-            <div><dt>Flight</dt><dd id="s-flight">—</dd></div>
-            <div><dt>Aircraft</dt><dd id="s-aircraft">—</dd></div>
-            <div><dt>Registration</dt><dd id="s-registration">—</dd></div>
-            <div><dt>Waypoints</dt><dd id="s-waypoints">—</dd></div>
-            <div><dt>Distance</dt><dd id="s-distance">—</dd></div>
-            <div><dt>Departs</dt><dd id="s-departs">—</dd></div>
-          </dl>
+        <dl class="summary">
+          <div><dt>Flight</dt><dd id="s-flight">—</dd></div>
+          <div><dt>Aircraft</dt><dd id="s-aircraft">—</dd></div>
+          <div><dt>Registration</dt><dd id="s-registration">—</dd></div>
+          <div><dt>Waypoints</dt><dd id="s-waypoints">—</dd></div>
+          <div><dt>Distance</dt><dd id="s-distance">—</dd></div>
+          <div><dt>Departs</dt><dd id="s-departs">—</dd></div>
+        </dl>
 
-          <label for="plan" class="field-label">Job request <span>JSON · POST /v1/jobs</span></label>
-          <textarea id="plan" rows="16" wrap="off" spellcheck="false" required aria-describedby="plan-note plan-hint">{
+        <label for="plan" class="field-label">Job request <code>POST /v1/jobs</code></label>
+        <textarea id="plan" rows="15" wrap="off" spellcheck="false" required aria-describedby="plan-note">{
   "type": "fuel_estimate",
   "payload": {
     "airline": "ABC",
@@ -80,61 +57,40 @@
     ]
   }
 }</textarea>
-          <p id="plan-note" class="note"></p>
+        <p id="plan-note" class="note"></p>
 
-          <div class="actions">
-            <button type="submit" id="file" class="file">
-              File plan
-              <svg viewBox="0 0 28 24" aria-hidden="true"><use href="#plane"/></svg>
-            </button>
-            <button type="button" id="tidy" class="ghost">Tidy JSON</button>
-            <button type="button" id="reset" class="ghost">Reset sample</button>
-            <p id="plan-hint" class="hint"><kbd>⌘</kbd> / <kbd>Ctrl</kbd> + <kbd>Enter</kbd> files the plan</p>
-          </div>
-
-          <p id="message" class="radio" role="status" aria-live="polite">
-            <span class="radio-tag" aria-hidden="true">TWR</span>
-            <span id="message-text">Standing by. Pick an airline, check the plan, and file it.</span>
-          </p>
-        </form>
-      </section>
-
-      <section class="board" aria-labelledby="board-heading">
-        <div class="board-head">
-          <div>
-            <p class="step"><span class="step-no">02</span> Watch</p>
-            <h2 id="board-heading">Departures <span id="board-airline" class="board-airline"></span></h2>
-          </div>
-          <p id="link" class="link"><span class="link-dot" aria-hidden="true"></span><span id="link-text">Connecting…</span></p>
+        <div class="actions">
+          <button type="submit" id="file" class="primary">Submit job</button>
+          <button type="button" id="tidy" class="quiet">Format JSON</button>
+          <button type="button" id="reset" class="quiet">Reset sample</button>
+          <span class="hint"><kbd>⌘</kbd>/<kbd>Ctrl</kbd> <kbd>Enter</kbd></span>
         </div>
-        <div class="poll" aria-hidden="true"><span id="poll"></span></div>
+        <p id="message" class="message" role="status" aria-live="polite">Pick an airline, check the plan, and submit it.</p>
+      </form>
 
-        <div class="gauges">
-          <div class="donut" aria-hidden="true">
-            <svg viewBox="0 0 42 42">
-              <circle class="track" cx="21" cy="21" r="15.915"/>
-              <circle id="arc-succeeded" cx="21" cy="21" r="15.915" stroke="var(--succeeded)" stroke-dasharray="0 100"/>
-              <circle id="arc-running" cx="21" cy="21" r="15.915" stroke="var(--running)" stroke-dasharray="0 100"/>
-              <circle id="arc-queued" cx="21" cy="21" r="15.915" stroke="var(--queued)" stroke-dasharray="0 100"/>
-              <circle id="arc-failed" cx="21" cy="21" r="15.915" stroke="var(--failed)" stroke-dasharray="0 100"/>
-            </svg>
-            <p class="donut-total"><b id="donut-total">0</b><span>jobs</span></p>
-          </div>
-          <ul class="legend" aria-label="Jobs by status">
-            <li data-status="succeeded"><span class="lamp" aria-hidden="true"></span>Succeeded <b id="count-succeeded">0</b></li>
-            <li data-status="running"><span class="lamp" aria-hidden="true"></span>Running <b id="count-running">0</b></li>
-            <li data-status="queued"><span class="lamp" aria-hidden="true"></span>Queued <b id="count-queued">0</b></li>
-            <li data-status="failed"><span class="lamp" aria-hidden="true"></span>Failed <b id="count-failed">0</b></li>
-          </ul>
-          <p class="fuel-total">
-            <span id="fuel-total">0.0</span><span class="unit">lb</span>
-            <span id="fuel-caption" class="caption">estimated fuel on the board</span>
-          </p>
+      <section class="jobs" aria-labelledby="jobs-heading">
+        <div class="jobs-head">
+          <h2 id="jobs-heading">Jobs <span id="board-airline" class="chip"></span></h2>
+          <p id="link" class="live">Connecting…</p>
+        </div>
+
+        <dl class="stats">
+          <div class="fuel-stat"><dt>Estimated fuel</dt><dd><span id="fuel-total">0.0</span> <small>lb</small></dd></div>
+          <div data-status="succeeded"><dt>Succeeded</dt><dd id="count-succeeded">0</dd></div>
+          <div data-status="running"><dt>Running</dt><dd id="count-running">0</dd></div>
+          <div data-status="queued"><dt>Queued</dt><dd id="count-queued">0</dd></div>
+          <div data-status="failed"><dt>Failed</dt><dd id="count-failed">0</dd></div>
+        </dl>
+        <div class="bar" aria-hidden="true">
+          <span id="bar-succeeded" data-status="succeeded"></span>
+          <span id="bar-running" data-status="running"></span>
+          <span id="bar-queued" data-status="queued"></span>
+          <span id="bar-failed" data-status="failed"></span>
         </div>
 
         <div class="table-wrap">
           <table>
-            <caption>Newest first · refreshes every 2 s · open a job for its full estimate</caption>
+            <caption class="sr-only">Jobs, newest first, refreshed every 2 seconds</caption>
             <thead>
               <tr>
                 <th scope="col">Job</th>
@@ -147,46 +103,34 @@
             <tbody id="jobs"></tbody>
           </table>
         </div>
-        <p id="empty" class="empty" hidden><strong>Board is clear</strong>File a plan and its departure lands here.</p>
+        <p id="empty" class="empty" hidden>No jobs yet. Submit a plan and it shows up here.</p>
       </section>
     </main>
 
     <footer class="foot">
-      Auth is mocked for this demo: the chosen airline travels as the <code>X-Airline</code> header.
+      Demo auth: the selected airline is sent as the <code>X-Airline</code> header.
     </footer>
   </div>
 
-  <dialog id="pass" aria-labelledby="pass-title">
-    <article class="pass">
-      <div class="pass-main">
-        <p class="pass-kicker">OptiFuel · Fuel estimate</p>
-        <h2 id="pass-title">Job <span id="p-id"></span></h2>
-        <div class="pass-route">
-          <div><span class="pass-label">Airline</span><strong id="p-airline"></strong></div>
-          <svg viewBox="0 0 200 26" aria-hidden="true">
-            <line x1="0" y1="13" x2="200" y2="13" stroke-width="1.5" stroke-dasharray="4 5"/>
-            <use href="#plane" x="86" y="1" width="28" height="24" stroke="none"/>
-          </svg>
-          <div><span class="pass-label">Flight</span><strong id="p-flight"></strong></div>
-        </div>
-        <dl class="pass-grid">
-          <div><dt>Status</dt><dd id="p-status" class="status"></dd></div>
-          <div><dt>Attempts</dt><dd id="p-attempts"></dd></div>
-          <div><dt>Model</dt><dd id="p-model"></dd></div>
-          <div><dt>Distance</dt><dd id="p-distance"></dd></div>
-          <div><dt>Air time</dt><dd id="p-duration"></dd></div>
-          <div><dt>Submitted</dt><dd id="p-submitted"></dd></div>
-          <div><dt>Finished</dt><dd id="p-finished"></dd></div>
-        </dl>
-        <p id="p-error" class="pass-error" hidden></p>
+  <dialog id="job-dialog" aria-labelledby="d-title">
+    <div class="dialog-head">
+      <div>
+        <p id="d-flight" class="eyebrow"></p>
+        <h2 id="d-title">Job <span id="d-id"></span></h2>
       </div>
-      <div class="pass-stub">
-        <span class="pass-label">Fuel</span>
-        <p class="pass-fuel"><span id="p-fuel">—</span><small>lb</small></p>
-        <svg id="p-barcode" class="barcode" viewBox="0 0 120 40" preserveAspectRatio="none" aria-hidden="true"></svg>
-        <form method="dialog"><button class="ghost">Close</button></form>
-      </div>
-    </article>
+      <span id="d-status" class="status"></span>
+    </div>
+    <p class="dialog-fuel"><span id="d-fuel">—</span> <small>lb fuel</small></p>
+    <dl class="details">
+      <div><dt>Attempts</dt><dd id="d-attempts"></dd></div>
+      <div><dt>Model</dt><dd id="d-model"></dd></div>
+      <div><dt>Distance</dt><dd id="d-distance"></dd></div>
+      <div><dt>Air time</dt><dd id="d-duration"></dd></div>
+      <div><dt>Submitted</dt><dd id="d-submitted"></dd></div>
+      <div><dt>Finished</dt><dd id="d-finished"></dd></div>
+    </dl>
+    <p id="d-error" class="error" hidden></p>
+    <form method="dialog"><button class="secondary">Close</button></form>
   </dialog>
 </body>
 </html>

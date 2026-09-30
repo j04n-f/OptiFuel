@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 const form = $("submit-form");
 const plan = $("plan");
 const board = $("jobs");
-const pass = $("pass");
+const dialog = $("job-dialog");
 const SAMPLE = plan.value;
 const SVG = "http://www.w3.org/2000/svg";
 const RAD = Math.PI / 180;
@@ -70,23 +70,18 @@ function readPlan() {
 }
 
 function say(text, kind = "") {
-  $("message-text").textContent = text;
-  $("message").className = `radio ${kind}`;
-}
-function setStamp(state) {
-  const stamp = $("stamp");
-  stamp.className = `stamp ${state}`;
-  stamp.textContent = { ready: "Ready", bad: "Check JSON", filed: "Filed" }[state];
+  const message = $("message");
+  message.textContent = text;
+  message.className = `message ${kind}`;
 }
 function setLink(live) {
-  $("link").classList.toggle("lost", !live);
-  $("link-text").textContent = live ? `Live · synced ${hms(new Date())}Z` : "Signal lost · retrying";
+  const link = $("link");
+  link.classList.toggle("lost", !live);
+  link.textContent = live ? `Live · ${hms(new Date())}Z` : "Offline · retrying";
 }
-function restartPoll() {
-  const bar = $("poll");
-  bar.style.animation = "none";
-  void bar.offsetWidth;
-  bar.style.animation = "";
+function setStatus(node, status) {
+  node.dataset.status = status;
+  node.textContent = status;
 }
 
 // ---------- Plan preview ----------
@@ -95,7 +90,6 @@ function preview(animate = false) {
   const note = $("plan-note");
   const { body, error } = readPlan();
   if (error) {
-    setStamp("bad");
     note.className = "note bad";
     note.textContent = `Not valid JSON yet: ${error.message}`;
     return;
@@ -107,7 +101,6 @@ function preview(animate = false) {
   const legs = points.slice(1).map((w, i) => km(points[i], w));
   const distance = legs.reduce((a, b) => a + b, 0);
 
-  setStamp("ready");
   note.className = "note";
   note.textContent = points.length < 2
     ? "Add at least two waypoints to draw the route."
@@ -128,7 +121,7 @@ function drawRoute(points, distance, animate) {
   const H = 300;
   map.replaceChildren();
   if (points.length < 2) {
-    svg("text", { x: W / 2, y: H / 2, class: "placeholder", "text-anchor": "middle" }, map, "The route draws itself here");
+    svg("text", { x: W / 2, y: H / 2, class: "placeholder", "text-anchor": "middle" }, map, "Route appears here");
     map.setAttribute("aria-label", "Route map: not enough waypoints");
     return;
   }
@@ -168,48 +161,26 @@ function drawRoute(points, distance, animate) {
     svg("text", { x: x + 5, y: H - 8 }, grat, deg(i * lonStep, lonStep, "E", "W"));
   }
 
-  const rose = svg("g", { class: "rose", transform: `translate(${W - 34} 36)` }, map);
-  svg("circle", { r: 17 }, rose);
-  svg("path", { d: "M0 -13 L4 2 L0 -1 L-4 2 Z" }, rose);
-  svg("text", { y: 12, "text-anchor": "middle" }, rose, "N");
-
   const at = points.map((w) => [px(w.longitude), py(w.latitude)]);
   const d = at.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-  svg("path", { d, class: "halo" }, map);
-  svg("path", { d, id: "route-line", class: animate && !reduceMotion ? "leg draw" : "leg", pathLength: 1 }, map);
-  for (let i = 1; i < at.length; i++) {
-    const [ax, ay] = at[i - 1];
-    const [bx, by] = at[i];
-    const angle = Math.atan2(by - ay, bx - ax) / RAD;
-    svg("path", { d: "M-4 -4 L2 0 L-4 4", class: "chev", transform: `translate(${(ax + bx) / 2} ${(ay + by) / 2}) rotate(${angle})` }, map);
-  }
+  svg("path", { d, class: animate && !reduceMotion ? "leg draw" : "leg", pathLength: 1 }, map);
 
   points.forEach((w, i) => {
-    const g = svg("g", { class: "wp", transform: `translate(${at[i][0].toFixed(1)} ${at[i][1].toFixed(1)})` }, map);
+    const end = i === 0 || i === points.length - 1;
+    const g = svg("g", { class: end ? "wp end" : "wp", transform: `translate(${at[i][0].toFixed(1)} ${at[i][1].toFixed(1)})` }, map);
     svg("title", {}, g, `Waypoint ${i + 1}: ${w.latitude}, ${w.longitude} · ${w.speed} km/h · ${w.altitude} ft`);
-    svg("circle", { r: 7 }, g);
-    svg("circle", { r: 2.5, class: "dot" }, g);
+    svg("circle", { r: end ? 6 : 4 }, g);
     const label = i === 0 ? "DEP" : i === points.length - 1 ? "ARR" : `WP${i + 1}`;
-    svg("text", { y: -13, "text-anchor": "middle" }, g, label);
+    svg("text", { y: -12, "text-anchor": "middle" }, g, label);
   });
-
-  const plane = svg("g", { class: "plane" }, map);
-  svg("use", { href: "#plane", x: -13, y: -11, width: 26, height: 22 }, plane);
-  if (reduceMotion) {
-    const [[ax, ay], [bx, by]] = at.slice(-2);
-    plane.setAttribute("transform", `translate(${bx} ${by}) rotate(${Math.atan2(by - ay, bx - ax) / RAD})`);
-  } else {
-    const motion = svg("animateMotion", { dur: `${Math.min(14, 5 + points.length)}s`, repeatCount: "indefinite", rotate: "auto" }, plane);
-    svg("mpath", { href: "#route-line" }, motion);
-  }
 }
 
 function drawProfile(points, legs) {
   const chart = $("profile");
   const W = 640;
-  const H = 120;
-  const top = 28;
-  const bottom = 24;
+  const H = 110;
+  const top = 26;
+  const bottom = 22;
   const side = 16;
   chart.replaceChildren();
   if (points.length < 2) {
@@ -225,51 +196,31 @@ function drawProfile(points, legs) {
   chart.setAttribute("aria-label", `Altitude profile: ${alts.map((a) => num(a)).join(", ")} ft`);
 
   const gradient = svg("linearGradient", { id: "alt-fill", x1: 0, y1: 0, x2: 0, y2: 1 }, svg("defs", {}, chart));
-  svg("stop", { offset: 0, "stop-color": "#2b5d8f", "stop-opacity": 0.35 }, gradient);
-  svg("stop", { offset: 1, "stop-color": "#2b5d8f", "stop-opacity": 0.02 }, gradient);
+  svg("stop", { offset: 0 }, gradient);
+  svg("stop", { offset: 1 }, gradient);
   const line = alts.map((a, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(a).toFixed(1)}`).join(" ");
   const last = alts.length - 1;
-  svg("path", { d: `${line} L${x(last)} ${H - bottom} L${x(0)} ${H - bottom} Z`, fill: "url(#alt-fill)" }, chart);
-  svg("line", { x1: side, x2: W - side, y1: H - bottom, y2: H - bottom, class: "ground" }, chart);
+  svg("path", { d: `${line} L${x(last)} ${H - bottom} L${x(0)} ${H - bottom} Z`, class: "area" }, chart);
   svg("path", { d: line, class: "alt-line" }, chart);
   alts.forEach((a, i) => {
-    svg("circle", { cx: x(i), cy: y(a), r: 3.5 }, chart);
+    svg("circle", { cx: x(i), cy: y(a), r: 3 }, chart);
     if (alts.length <= 8) {
       const anchor = i === 0 ? "start" : i === last ? "end" : "middle";
       svg("text", { x: x(i), y: y(a) - 9, "text-anchor": anchor }, chart, `${num(a)} ft`);
     }
   });
-  svg("text", { x: side, y: H - 7 }, chart, "0 km");
-  svg("text", { x: W / 2, y: H - 7, "text-anchor": "middle" }, chart, "Vertical profile");
+  svg("text", { x: side, y: H - 6 }, chart, "0 km");
   if (cumulative.at(-1) > 0) {
-    svg("text", { x: W - side, y: H - 7, "text-anchor": "end" }, chart, `${num(cumulative.at(-1))} km`);
+    svg("text", { x: W - side, y: H - 6, "text-anchor": "end" }, chart, `${num(cumulative.at(-1))} km`);
   }
 }
 
-// ---------- Departures board ----------
-
-function statusBadge(target, status, flaps) {
-  target.dataset.status = status;
-  const lamp = tag("span", "lamp");
-  lamp.setAttribute("aria-hidden", "true");
-  const nodes = [lamp, tag("span", flaps ? "st-text" : "", status)];
-  if (flaps) {
-    const tiles = tag("span", "flaps");
-    tiles.setAttribute("aria-hidden", "true");
-    [...status.toUpperCase().padEnd(9)].forEach((ch, i) => {
-      const tile = tag("span", "", ch);
-      tile.style.setProperty("--i", i);
-      tiles.append(tile);
-    });
-    nodes.push(tiles);
-  }
-  target.replaceChildren(...nodes);
-}
+// ---------- Jobs ----------
 
 function outcome(job) {
   if (job.result) {
-    const fuel = tag("span", "fuel");
-    fuel.append(tag("b", "", num(job.result.total_fuel_lb, 1)), tag("small", "", "lb"));
+    const fuel = tag("span", "fuel", num(job.result.total_fuel_lb, 1));
+    fuel.append(tag("small", "", " lb"));
     return fuel;
   }
   if (job.error) {
@@ -277,59 +228,47 @@ function outcome(job) {
     error.title = job.error;
     return error;
   }
-  return tag("span", "pending", job.status === "running" ? "estimating…" : "waiting for a worker");
+  return tag("span", "pending", job.status === "running" ? "Estimating…" : "Waiting for a worker");
 }
 
-function makeRow(id, index) {
+function makeRow(id) {
   const tr = document.createElement("tr");
-  tr.style.setProperty("--row", index);
   const head = tag("th");
   head.scope = "row";
-  const button = tag("button", "job-btn");
+  const button = tag("button", "job-btn", `#${id}`);
   button.type = "button";
-  const hash = tag("span", "hash", "#");
-  hash.setAttribute("aria-hidden", "true");
-  button.append(tag("span", "sr-only", "Job "), hash, String(id), tag("span", "sr-only", ", details"));
-  button.addEventListener("click", () => openPass(id));
+  button.setAttribute("aria-label", `Job ${id} details`);
+  // The whole row opens the job; the button is its keyboard target, and its click bubbles here.
+  tr.addEventListener("click", () => openDialog(id));
   head.append(button);
-  const cells = { flight: tag("td"), status: tag("td"), attempts: tag("td", "attempts"), outcome: tag("td") };
+  const status = tag("span", "status");
+  const cells = { flight: tag("td"), status: tag("td"), attempts: tag("td", "num"), outcome: tag("td") };
+  cells.status.append(status);
   tr.append(head, ...Object.values(cells));
-  return { tr, ...cells, job: null };
+  return { tr, ...cells, badge: status, job: null };
 }
 
 function updateRow(row, job) {
   const before = row.job;
   row.job = job;
   if (before && JSON.stringify(before) === JSON.stringify(job)) return;
-  row.tr.dataset.status = job.status;
   row.flight.replaceChildren(tag("span", "carrier", job.airline), ` ${job.flight_id}`);
-  if (before?.status !== job.status) {
-    const badge = tag("span", "status");
-    statusBadge(badge, job.status, true);
-    row.status.replaceChildren(badge);
-  }
+  setStatus(row.badge, job.status);
   row.attempts.textContent = job.attempts;
   row.outcome.replaceChildren(outcome(job));
-  if (openJob === job.id) fillPass(job);
-}
-
-function flash(tr) {
-  tr.classList.remove("fresh");
-  void tr.offsetWidth;
-  tr.classList.add("fresh");
+  if (openJob === job.id) fillDialog(job);
 }
 
 function renderJobs(list) {
-  let created = 0;
   const ordered = list.map((job) => {
     let row = rows.get(job.id);
     if (!row) {
-      row = makeRow(job.id, created++);
+      row = makeRow(job.id);
       rows.set(job.id, row);
     }
     updateRow(row, job);
     if (job.id === highlight) {
-      flash(row.tr);
+      row.tr.classList.add("fresh");
       highlight = null;
     }
     return row.tr;
@@ -341,30 +280,21 @@ function renderJobs(list) {
       rows.delete(id);
     }
   }
-  // Move only rows out of place: reattaching replays their animations and blurs focus.
+  // Move only rows out of place: reattaching blurs focus.
   ordered.forEach((tr, i) => {
     if (board.children[i] !== tr) board.insertBefore(tr, board.children[i] ?? null);
   });
   $("empty").hidden = list.length > 0;
 }
 
-function renderGauges(list) {
+function renderStats(list) {
   const counts = Object.fromEntries(STATUSES.map((s) => [s, 0]));
   for (const job of list) counts[job.status] += 1;
-  let offset = 0;
   for (const status of STATUSES) {
-    const share = list.length ? (counts[status] / list.length) * 100 : 0;
-    const arc = $(`arc-${status}`);
-    arc.setAttribute("stroke-dasharray", `${share} ${100 - share}`);
-    arc.setAttribute("stroke-dashoffset", -offset);
-    offset += share;
     $(`count-${status}`).textContent = counts[status];
+    $(`bar-${status}`).style.flexGrow = counts[status];
   }
-  $("donut-total").textContent = list.length;
   $("fuel-total").textContent = num(list.reduce((sum, job) => sum + (job.result?.total_fuel_lb ?? 0), 0), 1);
-  $("fuel-caption").textContent = list.length
-    ? `from ${counts.succeeded} succeeded ${counts.succeeded === 1 ? "job" : "jobs"}`
-    : "estimated fuel on the board";
 }
 
 async function refresh() {
@@ -383,48 +313,37 @@ async function refresh() {
   if (code !== current) return;
   setLink(true);
   renderJobs(list);
-  renderGauges(list);
+  renderStats(list);
 }
 
-// ---------- Boarding pass ----------
+// ---------- Job dialog ----------
 
-function fillPass(job) {
+function fillDialog(job) {
   const result = job.result;
-  $("p-id").textContent = `#${job.id}`;
-  $("p-airline").textContent = job.airline;
-  $("p-flight").textContent = job.flight_id;
-  statusBadge($("p-status"), job.status, false);
-  $("p-attempts").textContent = job.attempts;
-  $("p-model").textContent = result?.model_version ?? "—";
-  $("p-distance").textContent = result ? `${num(result.distance_km, 1)} km` : "—";
-  $("p-duration").textContent = result ? airTime(result.duration_h) : "—";
-  $("p-submitted").textContent = when(job.submitted_at);
-  $("p-finished").textContent = when(job.finished_at);
-  $("p-fuel").textContent = result ? num(result.total_fuel_lb, 1) : "—";
-  const error = $("p-error");
+  $("d-id").textContent = `#${job.id}`;
+  $("d-flight").textContent = `${job.airline} ${job.flight_id}`;
+  setStatus($("d-status"), job.status);
+  $("d-attempts").textContent = job.attempts;
+  $("d-model").textContent = result?.model_version ?? "—";
+  $("d-distance").textContent = result ? `${num(result.distance_km, 1)} km` : "—";
+  $("d-duration").textContent = result ? airTime(result.duration_h) : "—";
+  $("d-submitted").textContent = when(job.submitted_at);
+  $("d-finished").textContent = when(job.finished_at);
+  $("d-fuel").textContent = result ? num(result.total_fuel_lb, 1) : "—";
+  const error = $("d-error");
   error.hidden = !job.error;
   error.textContent = job.error ?? "";
-
-  const code = $("p-barcode");
-  code.replaceChildren();
-  const seed = `${job.airline}-${job.id}-${job.flight_id}`;
-  for (let x = 0, h = 7, i = 0; x < 120; i++) {
-    h = (h * 31 + seed.charCodeAt(i % seed.length)) % 997;
-    const width = 1 + (h % 3);
-    if (h % 2 === 0) svg("rect", { x, y: 0, width, height: 40 }, code);
-    x += width;
-  }
 }
 
-function openPass(id) {
+function openDialog(id) {
   const row = rows.get(id);
   if (!row) return;
   openJob = id;
-  fillPass(row.job);
-  if (!pass.open) pass.showModal();
+  fillDialog(row.job);
+  if (!dialog.open) dialog.showModal();
 }
-pass.addEventListener("close", () => { openJob = null; });
-pass.addEventListener("click", (event) => { if (event.target === pass) pass.close(); });
+dialog.addEventListener("close", () => { openJob = null; });
+dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
 
 // ---------- Controls ----------
 
@@ -442,11 +361,11 @@ function selectAirline() {
   current = document.querySelector('input[name="airline"]:checked')?.value ?? "";
   document.documentElement.style.setProperty("--hue", hueOf(current));
   $("board-airline").textContent = current;
-  if (pass.open) pass.close();
+  if (dialog.open) dialog.close();
   rows.clear();
   board.replaceChildren();
   $("empty").hidden = true;
-  renderGauges([]);
+  renderStats([]);
   syncPlanAirline();
   preview(true);
   refresh();
@@ -466,7 +385,7 @@ plan.addEventListener("keydown", (event) => {
 $("tidy").addEventListener("click", () => {
   const { body, error } = readPlan();
   if (error) {
-    say(`Can't tidy: ${error.message}`, "err");
+    say(`Can't format: ${error.message}`, "err");
     return;
   }
   plan.value = tidy(body);
@@ -500,7 +419,7 @@ form.addEventListener("submit", async (event) => {
   const button = $("file");
   filing = true;
   button.setAttribute("aria-disabled", "true");
-  say(`Filing plan as ${current}…`);
+  say(`Submitting as ${current}…`);
   try {
     const response = await api("/v1/jobs", {
       method: "POST",
@@ -508,12 +427,11 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify(body),
     }).catch(() => null);
     if (!response) {
-      say("Could not reach the API. Check the connection and file again.", "err");
+      say("Could not reach the API. Check the connection and try again.", "err");
     } else if (response.ok) {
       const { id } = await response.json();
       highlight = id;
-      setStamp("filed");
-      say(`Job ${id} filed for ${current}. Watch it on the departures board.`, "ok");
+      say(`Job ${id} submitted for ${current}.`, "ok");
       refresh();
     } else {
       say(`Rejected (${response.status}): ${await detail(response)}`, "err");
@@ -523,10 +441,6 @@ form.addEventListener("submit", async (event) => {
     button.removeAttribute("aria-disabled");
   }
 });
-
-const tick = () => { $("clock").textContent = hms(new Date()); };
-tick();
-setInterval(tick, 1000);
 
 (async () => {
   const response = await fetch("/v1/tenants").catch(() => null);
@@ -539,8 +453,7 @@ setInterval(tick, 1000);
   }
   const group = $("airlines");
   codes.forEach((code, i) => {
-    const label = tag("label", "tag");
-    label.style.setProperty("--tag-hue", hueOf(code));
+    const label = tag("label");
     const input = tag("input", "sr-only");
     Object.assign(input, { type: "radio", name: "airline", value: code, checked: i === 0 });
     label.append(input, tag("span", "", code));
@@ -548,8 +461,5 @@ setInterval(tick, 1000);
   });
   group.addEventListener("change", selectAirline);
   selectAirline();
-  setInterval(() => {
-    restartPoll();
-    refresh();
-  }, 2000);
+  setInterval(refresh, 2000);
 })();
