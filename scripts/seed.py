@@ -2,6 +2,9 @@
 
 DEMO has no worker, so its queued and running jobs stay as seeded. Re-running replaces them.
 The API shows them only when DEMO is in `OPTIFUEL_TENANTS`.
+
+The running job belongs to a fake worker whose heartbeat is a century ahead, so cleanup never
+takes it for a dead worker's job and requeues it.
 """
 
 import sys
@@ -56,8 +59,20 @@ def main() -> None:
         sys.exit("seed writes fake jobs: dev only")
     now = datetime.now(UTC)
     with psycopg.connect(settings.database_url.get_secret_value()) as conn, conn.transaction():
+        # The fake worker before its jobs, which hold the only reference to it.
+        conn.execute(
+            "DELETE FROM procrastinate_workers WHERE id IN"
+            " (SELECT worker_id FROM procrastinate_jobs WHERE queue_name = %s)",
+            (queue_name(AIRLINE),),
+        )
         # Cascades to job_records.
         conn.execute("DELETE FROM procrastinate_jobs WHERE queue_name = %s", (queue_name(AIRLINE),))
+        worker = conn.execute(
+            "INSERT INTO procrastinate_workers (last_heartbeat)"
+            " VALUES (now() + interval '100 years') RETURNING id"
+        ).fetchone()
+        if worker is None:
+            raise RuntimeError("INSERT ... RETURNING gave no row")
         for status, flight_id, minutes_ago, took_s, result, error in JOBS:
             submitted = now - timedelta(minutes=minutes_ago)
             finished = submitted + timedelta(seconds=took_s) if took_s is not None else None
@@ -65,9 +80,16 @@ def main() -> None:
             # Procrastinate's `attempts` counts finished tries; a finished job has one.
             attempts = 1 if finished else 0
             row = conn.execute(
-                "INSERT INTO procrastinate_jobs (queue_name, task_name, args, status, attempts)"
-                " VALUES (%s, 'fuel_estimate', %s, %s, %s) RETURNING id",
-                (queue_name(AIRLINE), Jsonb(args), status, attempts),
+                "INSERT INTO procrastinate_jobs"
+                " (queue_name, task_name, args, status, attempts, worker_id)"
+                " VALUES (%s, 'fuel_estimate', %s, %s, %s, %s) RETURNING id",
+                (
+                    queue_name(AIRLINE),
+                    Jsonb(args),
+                    status,
+                    attempts,
+                    worker[0] if status == "doing" else None,
+                ),
             ).fetchone()
             if row is None:
                 raise RuntimeError("INSERT ... RETURNING gave no row")

@@ -133,9 +133,13 @@ stateDiagram-v2
 Procrastinate status maps to the contract: `todo → queued`, `doing → running`, `succeeded`,
 `failed`. `cancelled` and `aborted` are unreachable: there is no cancel endpoint.
 
-- **Transient**: weather timeout, connection error or 5xx; Postgres `OperationalError`. Retried
-  via `RetryStrategy(max_attempts=3, exponential_wait=5, retry_exceptions={...})`.
-- **Permanent**: `out_of_envelope`, model file missing, ground speed ≤ 0. Fail at once.
+- **Transient**: weather timeout, connection error or 5xx (the client raises
+  `WeatherUnavailableError`); Postgres `OperationalError`. Retried via
+  `RetryStrategy(max_attempts=2, exponential_wait=5, retry_exceptions={...})`: `max_attempts`
+  counts retries, so 3 attempts, waiting 5 s then 25 s.
+- **Permanent**: everything else, e.g. `out_of_envelope`, ground speed ≤ 0, a weather 4xx or
+  malformed reply. Fail at once. A missing model never reaches a job: the worker refuses to
+  start (§5).
 - **Dead letters**: `failed` jobs with their `error`. Resubmitting the same plan creates a new job.
 - **Duplicates**: `plan_key = sha256(canonical payload)`. The API returns the airline's latest
   not-failed job with that key. `queueing_lock = "{airline}:{plan_key}"` catches two identical
@@ -337,7 +341,7 @@ is stateless.
 
 | Failure | Behaviour |
 |---|---|
-| Worker crashes mid-job | Heartbeat goes stale after 30 s; cleanup requeues; `attempts` still caps retries |
+| Worker crashes mid-job | Heartbeat goes stale after 30 s; cleanup requeues and `attempts` counts the lost try. `ponytail:` a job that kills its worker every time is requeued every run; fail stalled jobs past the retry cap if that shows up |
 | Weather API down or slow | 5 s timeout, retried with backoff, `failed` after 3 attempts with the error kept |
 | Postgres down | `/ready` fails so the API is taken out of the Service; workers reconnect; queued work survives |
 | Bad or missing model | Worker fails fast at startup (CrashLoopBackOff, visible); jobs wait queued |
@@ -398,12 +402,13 @@ offline with fakes (tests red first).
 5. **Queue and worker.** Procrastinate app, `fuel_estimate` task with retry strategy, Postgres
    repositories, `worker.py`, `migrate.py`, `cleanup.py`, `sql/schema.sql`.
    *Check (end-to-end, POST then GET):* `test_estimates_route_fuel` (succeeded, fuel in body,
-   weather asked for every waypoint) and `test_fails_out_of_envelope_plan`.
+   weather asked for every waypoint) and `test_fails_permanent_error_on_first_attempt`.
 6. **Static page.** `index.html` served at `/`.
 7. **Compose.** `docker-compose.yaml` (repo root): postgres (official image, tag+digest), migrate
-   (one-shot), api, worker-abc, worker-xyz (each mounts only its model), WireMock weather stub, and
-   seed (one-shot, `scripts/seed.py`, mounted since dev tooling stays out of the image): a fake
-   `DEMO` tenant with no model or worker, holding one job in each status so the page shows them all.
+   (one-shot), api, worker-abc, worker-xyz (each mounts only its model), cleanup (a 5-minute loop
+   standing in for the CronJob), WireMock weather stub, and seed (one-shot, `scripts/seed.py`,
+   mounted since dev tooling stays out of the image): a fake `DEMO` tenant with no model or
+   worker, holding one job in each status so the page shows them all.
    *Check:* `docker compose up`, submit via the page as ABC, see `succeeded`; ABC's job is 404 for
    XYZ; DEMO lists queued, running, succeeded and failed.
 8. **Helm.** `deploy/helm/optifuel`: API Deployment/Service/HPA, per-tenant worker Deployment +

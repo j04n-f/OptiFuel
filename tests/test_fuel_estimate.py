@@ -4,6 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.clients.weather import WeatherUnavailableError
 from tests.conftest import (
     DEPARTURE,
     IN_ENVELOPE,
@@ -57,29 +58,70 @@ def test_departs_at_received_time_by_default(
     assert asked[0].eta == clock.current
 
 
-def test_fails_out_of_envelope_plan(client: TestClient) -> None:
-    plan = flight_plan(
-        waypoint(0, 0, 200, 5000), waypoint(1, 0, 200, 35000), waypoint(1, 1, 300, 5000)
-    )
+@pytest.mark.parametrize(
+    ("plan", "failures", "error"),
+    [
+        pytest.param(
+            flight_plan(
+                waypoint(0, 0, 200, 5000), waypoint(1, 0, 200, 35000), waypoint(1, 1, 300, 5000)
+            ),
+            [],
+            "out_of_envelope: waypoints 1, 2",
+            id="out of envelope",
+        ),
+        pytest.param(
+            flight_plan(IN_ENVELOPE, IN_ENVELOPE),
+            [ValueError("malformed weather reply")],
+            "ValueError: malformed weather reply",
+            id="bad weather reply",
+        ),
+    ],
+)
+def test_fails_permanent_error_on_first_attempt(
+    client: TestClient,
+    weather: FakeWeather,
+    plan: dict[str, object],
+    failures: list[Exception],
+    error: str,
+) -> None:
+    weather.failures = list(failures)
 
     submitted = client.post("/v1/jobs", json=plan)
     job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
 
     assert job["status"] == "failed"
+    assert job["attempts"] == 1
     assert job["result"] is None
-    assert job["error"] == "out_of_envelope: waypoints 1, 2"
+    assert job["error"] == error
 
 
-def test_records_error_when_weather_fails(client: TestClient, weather: FakeWeather) -> None:
-    weather.error = TimeoutError("weather API timed out")
-    plan = flight_plan(waypoint(0, 0, 200, 5000), waypoint(1, 0, 200, 5000))
+def test_fails_after_three_attempts_while_weather_is_unavailable(
+    client: TestClient, weather: FakeWeather
+) -> None:
+    weather.failures = [
+        WeatherUnavailableError(f"weather API answered {s}") for s in (503, 502, 504)
+    ]
 
-    submitted = client.post("/v1/jobs", json=plan)
+    submitted = client.post("/v1/jobs", json=flight_plan(IN_ENVELOPE, IN_ENVELOPE))
     job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
 
     assert job["status"] == "failed"
+    assert job["attempts"] == 3
     assert job["result"] is None
-    assert job["error"] == "TimeoutError: weather API timed out"
+    assert job["error"] == "WeatherUnavailableError: weather API answered 504"
+    assert len(weather.calls) == 3
+
+
+def test_succeeds_on_retry_once_weather_recovers(client: TestClient, weather: FakeWeather) -> None:
+    weather.failures = [WeatherUnavailableError("weather API answered 503")]
+
+    submitted = client.post("/v1/jobs", json=flight_plan(IN_ENVELOPE, IN_ENVELOPE))
+    job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
+
+    assert job["status"] == "succeeded"
+    assert job["attempts"] == 2
+    assert job["result"] is not None
+    assert job["error"] is None
 
 
 V = IN_ENVELOPE
@@ -142,9 +184,8 @@ def test_returns_existing_job_for_resubmitted_plan(
 
 def test_queues_new_job_when_same_plan_failed(client: TestClient, weather: FakeWeather) -> None:
     plan = flight_plan(V, V)
-    weather.error = TimeoutError("weather API timed out")
+    weather.failures = [ValueError("malformed weather reply")]
     failed = client.post("/v1/jobs", json=plan).json()["id"]
-    weather.error = None
 
     again = client.post("/v1/jobs", json=plan).json()["id"]
 

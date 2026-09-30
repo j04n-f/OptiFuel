@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from procrastinate.jobs import Job
 from pydantic import SecretStr
 
 from src.api import create_app
@@ -14,6 +15,7 @@ from src.controllers.deps import get_clock, get_job_repository
 from src.repositories.protocols import JobRepository
 from src.schemas import FuelModel, FuelResult, JobSubmission, JobView
 from src.services.fuel import FuelService
+from src.worker import RETRY
 
 ABC_MODEL = FuelModel.model_validate(
     {
@@ -60,22 +62,23 @@ class FakeClock:
 
 
 class FakeWeather:
-    """Answers calm air for every point, or raises `error` if set; records each batched call."""
+    """Raises the next of `failures` per call, then answers calm air; records each batched call."""
 
     def __init__(self) -> None:
         self.calls: list[list[WindQuery]] = []
-        self.error: Exception | None = None
+        self.failures: list[Exception] = []
 
     def winds(self, points: Sequence[WindQuery]) -> list[Wind]:
         self.calls.append(list(points))
-        if self.error is not None:
-            raise self.error
+        if self.failures:
+            raise self.failures.pop(0)
         return [Wind(speed_kt=0, from_deg=0)] * len(points)
 
 
 class FakeJobs:
     """Job and result store in one dict; `submit` runs the airline's worker inline, like a queue
-    whose worker claims the job at once and, with no retries configured, fails it on any error."""
+    whose worker claims the job at once and reruns it, minus the backoff wait, while the task's
+    `RETRY` allows."""
 
     def __init__(self) -> None:
         self.jobs: dict[int, JobView] = {}
@@ -94,17 +97,29 @@ class FakeJobs:
             airline=plan.airline,
             flight_id=plan.flight_id,
             status="running",
-            attempts=1,
+            attempts=0,
             submitted_at=submitted_at,
         )
         self.jobs[job.id] = job
         self.plan_keys[job.id] = plan_key
-        try:
-            self.workers[plan.airline].estimate(job.id, plan)
-        except Exception:  # Procrastinate fails the attempt on any exception
-            job.status = "failed"
-        else:
-            job.status = "succeeded"
+        while job.status == "running":
+            job.attempts += 1
+            try:
+                self.workers[plan.airline].estimate(job.id, plan)
+            except Exception as error:  # Procrastinate fails the attempt on any exception
+                # The strategy's `attempts` counts finished tries, like procrastinate_jobs.
+                claimed = Job(
+                    id=job.id,
+                    queue="",
+                    lock=None,
+                    queueing_lock=None,
+                    task_name=job.type,
+                    attempts=job.attempts - 1,
+                )
+                if RETRY.get_retry_decision(exception=error, job=claimed) is None:
+                    job.status = "failed"
+            else:
+                job.status = "succeeded"
         return job.id
 
     def latest(self, airline: str, plan_key: str) -> JobView | None:

@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, HttpUrl, SecretStr
+from pydantic import BaseModel, HttpUrl, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,3 +24,5 @@ class Settings(BaseSettings):
     model_dir: Path = Path("/models")
     weather_url: HttpUrl | None = None
     weather_token: SecretStr | None = None
+    # Cleanup only: finished jobs, failed included, are purged this many days after they end.
+    retention_days: PositiveInt = 30
