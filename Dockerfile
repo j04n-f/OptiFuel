@@ -19,4 +19,4 @@ COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 USER app
 EXPOSE 8000
-CMD ["uvicorn", "--factory", "optifuel.api:from_env", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "--factory", "src.api:from_env", "--host", "0.0.0.0", "--port", "8000"]

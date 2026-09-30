@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 from itertools import pairwise
 from math import asin, atan2, cos, degrees, exp, radians, sin, sqrt
 
-from optifuel.clients.clock import Clock
-from optifuel.clients.weather import WeatherClient, Wind, WindQuery
-from optifuel.repositories.protocols import ResultRepository
-from optifuel.schemas import FlightPlan, FuelModel, FuelResult, Waypoint
+from src.clients.clock import Clock
+from src.clients.weather import WeatherClient, Wind, WindQuery
+from src.repositories.protocols import ResultRepository
+from src.schemas import FlightPlan, FuelModel, FuelResult, Waypoint
 
 EARTH_RADIUS_KM = 6371.0
 KMH_PER_KT = 1.852

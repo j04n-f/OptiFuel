@@ -3,7 +3,7 @@ import json
 import httpx2
 import pytest
 
-from optifuel.clients.weather import HttpWeatherClient, Wind, WindQuery
+from src.clients.weather import HttpWeatherClient, Wind, WindQuery
 from tests.conftest import DEPARTURE
 
 ROUTE = [WindQuery(0, 0, 5000, DEPARTURE), WindQuery(1, 0.5, 4000, DEPARTURE.replace(hour=11))]

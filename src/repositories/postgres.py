@@ -8,7 +8,7 @@ from psycopg.rows import class_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from optifuel.schemas import FuelResult, JobSubmission, JobView
+from src.schemas import FuelResult, JobSubmission, JobView
 
 
 def queue_name(airline: str) -> str:

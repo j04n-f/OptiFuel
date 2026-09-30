@@ -7,13 +7,13 @@ import procrastinate
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
-from optifuel.clients.clock import SystemClock
-from optifuel.clients.weather import HttpWeatherClient
-from optifuel.config import Settings
-from optifuel.repositories.files import FileModelRepository
-from optifuel.repositories.postgres import PostgresResultRepository, queue_app, queue_name
-from optifuel.schemas import FlightPlan
-from optifuel.services.fuel import FuelService
+from src.clients.clock import SystemClock
+from src.clients.weather import HttpWeatherClient
+from src.config import Settings
+from src.repositories.files import FileModelRepository
+from src.repositories.postgres import PostgresResultRepository, queue_app, queue_name
+from src.schemas import FlightPlan
+from src.services.fuel import FuelService
 
 
 def main() -> None:

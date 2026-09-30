@@ -10,9 +10,9 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 from psycopg.types.json import Jsonb
 
-from optifuel.config import Settings
-from optifuel.repositories.postgres import queue_name
-from optifuel.schemas import FlightPlan, FuelResult, Waypoint
+from src.config import Settings
+from src.repositories.postgres import queue_name
+from src.schemas import FlightPlan, FuelResult, Waypoint
 
 AIRLINE = "DEMO"
 MODEL_VERSION = "2026-09-30"

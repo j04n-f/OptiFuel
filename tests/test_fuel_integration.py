@@ -1,8 +1,8 @@
 import pytest
 
-from optifuel.clients.weather import Wind
-from optifuel.schemas import Waypoint
-from optifuel.services.fuel import integrate
+from src.clients.weather import Wind
+from src.schemas import Waypoint
+from src.services.fuel import integrate
 from tests.conftest import ABC_MODEL
 
 NORTHBOUND = [

@@ -1,4 +1,4 @@
--- Applied by `python -m optifuel.migrate` after Procrastinate's schema; safe to re-run.
+-- Applied by `python -m src.migrate` after Procrastinate's schema; safe to re-run.
 CREATE TABLE IF NOT EXISTS job_records (
     job_id       bigint PRIMARY KEY REFERENCES procrastinate_jobs (id) ON DELETE CASCADE,
     airline      text        NOT NULL,

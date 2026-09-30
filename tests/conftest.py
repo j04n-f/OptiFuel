@@ -6,14 +6,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from optifuel.api import create_app
-from optifuel.clients.clock import Clock
-from optifuel.clients.weather import Wind, WindQuery
-from optifuel.config import Settings, Tenant
-from optifuel.controllers.deps import get_clock, get_job_repository
-from optifuel.repositories.protocols import JobRepository
-from optifuel.schemas import FuelModel, FuelResult, JobSubmission, JobView
-from optifuel.services.fuel import FuelService
+from src.api import create_app
+from src.clients.clock import Clock
+from src.clients.weather import Wind, WindQuery
+from src.config import Settings, Tenant
+from src.controllers.deps import get_clock, get_job_repository
+from src.repositories.protocols import JobRepository
+from src.schemas import FuelModel, FuelResult, JobSubmission, JobView
+from src.services.fuel import FuelService
 
 ABC_MODEL = FuelModel.model_validate(
     {

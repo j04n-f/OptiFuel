@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from optifuel.schemas import FuelModel
+from src.schemas import FuelModel
 
 
 class FileModelRepository:

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Protocol
 
-from optifuel.schemas import FuelResult, JobSubmission, JobView
+from src.schemas import FuelResult, JobSubmission, JobView
 
 
 class JobRepository(Protocol):

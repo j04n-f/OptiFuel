@@ -2,10 +2,10 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from optifuel.clients.clock import Clock
-from optifuel.config import Settings
-from optifuel.repositories.protocols import JobRepository
-from optifuel.services.jobs import JobService, UnknownAirlineError
+from src.clients.clock import Clock
+from src.config import Settings
+from src.repositories.protocols import JobRepository
+from src.services.jobs import JobService, UnknownAirlineError
 
 
 # Providers read what api.create_app put on app.state; tests swap them via dependency_overrides.

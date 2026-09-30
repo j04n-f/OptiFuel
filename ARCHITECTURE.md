@@ -299,10 +299,10 @@ ConfigMaps.
 
 | Process | Command | Kubernetes object |
 |---|---|---|
-| API | `uvicorn --factory optifuel.api:from_env` (image default) | Deployment + Service + HPA (CPU) |
-| Worker | `python -m optifuel.worker` | Deployment per airline + KEDA ScaledObject |
-| Migrate | `python -m optifuel.migrate` | Job, Helm `pre-install,pre-upgrade` hook |
-| Cleanup | `python -m optifuel.cleanup` | CronJob `*/5 * * * *` |
+| API | `uvicorn --factory src.api:from_env` (image default) | Deployment + Service + HPA (CPU) |
+| Worker | `python -m src.worker` | Deployment per airline + KEDA ScaledObject |
+| Migrate | `python -m src.migrate` | Job, Helm `pre-install,pre-upgrade` hook |
+| Cleanup | `python -m src.cleanup` | CronJob `*/5 * * * *` |
 
 - **Migrate** applies the Procrastinate schema if it's absent, then `job_records` DDL
   (`IF NOT EXISTS`). `ponytail:` no migration tool; Procrastinate upgrades need its versioned
@@ -349,7 +349,7 @@ worker count pushes connection limits.
 
 ## 9. Frontend
 
-`src/optifuel/static/`, served at `/`: `index.html` (markup), `style.css`, `app.js`. No framework,
+`src/static/`, served at `/`: `index.html` (markup), `style.css`, `app.js`. No framework,
 no build:
 
 - Airline selector (from `GET /v1/tenants`), sent as `X-Airline`; the page's accent colour follows

@@ -1,10 +1,10 @@
 from collections.abc import Mapping
 from hashlib import sha256
 
-from optifuel.clients.clock import Clock
-from optifuel.config import Tenant
-from optifuel.repositories.protocols import JobRepository
-from optifuel.schemas import JobSubmission, JobView
+from src.clients.clock import Clock
+from src.config import Tenant
+from src.repositories.protocols import JobRepository
+from src.schemas import JobSubmission, JobView
 
 
 class UnknownAirlineError(Exception):

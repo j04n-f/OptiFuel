@@ -35,12 +35,12 @@ services:
 
   migrate:
     <<: *app
-    command: ["python", "-m", "optifuel.migrate"]
+    command: ["python", "-m", "src.migrate"]
     depends_on:
       postgres:
         condition: service_healthy
 
-  # scripts/ is dev tooling, not in the image: mounted, run against the image's optifuel.
+  # scripts/ is dev tooling, not in the image: mounted, run against the image's src package.
   seed:
     <<: *app
     command: ["python", "/scripts/seed.py"]
@@ -55,7 +55,7 @@ services:
   worker-abc:
     <<: *app
     restart: unless-stopped
-    command: ["python", "-m", "optifuel.worker"]
+    command: ["python", "-m", "src.worker"]
     environment:
       <<: *worker-env
       OPTIFUEL_WORKER_AIRLINE: ABC
@@ -68,7 +68,7 @@ services:
   worker-xyz:
     <<: *app
     restart: unless-stopped
-    command: ["python", "-m", "optifuel.worker"]
+    command: ["python", "-m", "src.worker"]
     environment:
       <<: *worker-env
       OPTIFUEL_WORKER_AIRLINE: XYZ

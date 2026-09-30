@@ -2,8 +2,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from optifuel.config import Settings
-from optifuel.controllers.deps import get_settings
+from src.config import Settings
+from src.controllers.deps import get_settings
 
 router = APIRouter(prefix="/v1/tenants")
 

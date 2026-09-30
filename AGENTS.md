@@ -42,7 +42,7 @@ Caveman. Technical substance stays, fluff dies.
 
 - **Warnings are errors** (`filterwarnings = ["error"]`). Fix a deprecation at its cause, the way `httpx2` replaced `httpx` for Starlette's `TestClient`; a warning filter needs the user's OK.
 - **Suppressions** name the rule and the reason: `# noqa: S301  provided dataset`, `# ty: ignore[<rule>]  <reason>`. ty is beta: a ty bump that adds diagnostics lands with its fixes.
-- **Deps** move through `uv add` / `uv remove`: `--group dev` for tooling, `--group analysis` for exercise-1-only libraries. Runtime `dependencies` is exactly what the Docker image ships, so it holds only what `src/optifuel` imports.
+- **Deps** move through `uv add` / `uv remove`: `--group dev` for tooling, `--group analysis` for exercise-1-only libraries. Runtime `dependencies` is exactly what the Docker image ships, so it holds only what `src/` imports.
 - **Pins**: every action is a full commit SHA plus `# vX.Y.Z` (zizmor fails anything else); resolve with `git ls-remote https://github.com/<owner>/<repo> refs/tags/<tag> 'refs/tags/<tag>^{}'`, taking the `^{}` line when present (annotated tag). Docker images are tag plus digest (`docker buildx imagetools inspect <image>:<tag>`). Checkout keeps `persist-credentials: false`.
 - **Smoke test** keeps `curl --retry-all-errors`: Docker's port proxy resets connections until uvicorn binds, so `--retry-connrefused` alone flakes.
 
@@ -51,11 +51,11 @@ Caveman. Technical substance stays, fluff dies.
 **Where it goes:**
 
 - `exercise_1/`: `analysis.ipynb` holds the narrative and calls `cleanup.py`, `compute.py`, `plot.py`, where the logic lives. After every change, Run All and save so committed outputs match the code. Dead ends stay in, each under a markdown cell saying what was tried and why it was dropped: the assignment grades the decision trail. Here addition beats deletion.
-- `src/optifuel/`: the job processor service (exercise 2), laid out as below. Design, decisions, and build plan: `ARCHITECTURE.md`; read it before changing the service's shape.
-- `scripts/`: dev tooling run against the service (`seed.py`: fake airline DEMO with a job in every status). `src/optifuel/` holds only code the image ships; anything else lives here.
+- `src/`: the job processor service (exercise 2), imported as package `src` (`from src.config import Settings`, `python -m src.worker`), laid out as below. Design, decisions, and build plan: `ARCHITECTURE.md`; read it before changing the service's shape.
+- `scripts/`: dev tooling run against the service (`seed.py`: fake airline DEMO with a job in every status). `src/` holds only code the image ships; anything else lives here.
 
 ```
-src/optifuel/
+src/
   api.py             composition root: Settings → clients → repositories → services → FastAPI app
   config.py          Settings, the one environment-variable reader
   schemas.py         pydantic models: FlightPlan, JobView, model file

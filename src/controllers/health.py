@@ -2,8 +2,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from optifuel.config import Settings
-from optifuel.controllers.deps import JobServiceDep, get_settings
+from src.config import Settings
+from src.controllers.deps import JobServiceDep, get_settings
 
 router = APIRouter()
 

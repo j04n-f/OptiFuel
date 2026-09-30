@@ -6,10 +6,10 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from psycopg_pool import ConnectionPool
 
-from optifuel.clients.clock import SystemClock
-from optifuel.config import Settings
-from optifuel.controllers import health, jobs, tenants
-from optifuel.repositories.postgres import PostgresJobRepository, queue_app
+from src.clients.clock import SystemClock
+from src.config import Settings
+from src.controllers import health, jobs, tenants
+from src.repositories.postgres import PostgresJobRepository, queue_app
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -43,10 +43,10 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(tenants.router)
     # Mounted last: routes match in order, so the catch-all "/" never shadows the API.
-    app.mount("/", StaticFiles(packages=[("optifuel", "static")], html=True))
+    app.mount("/", StaticFiles(packages=[("src", "static")], html=True))
     return app
 
 
 def from_env() -> FastAPI:
-    """`uvicorn --factory optifuel.api:from_env`: reads the environment at startup, not import."""
+    """`uvicorn --factory src.api:from_env`: reads the environment at startup, not import."""
     return create_app(Settings())

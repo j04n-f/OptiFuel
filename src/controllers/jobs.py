@@ -2,9 +2,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from optifuel.controllers.deps import AirlineDep, JobServiceDep
-from optifuel.schemas import JobSubmission, JobView
-from optifuel.services.jobs import AircraftNotEnabledError, AirlineMismatchError
+from src.controllers.deps import AirlineDep, JobServiceDep
+from src.schemas import JobSubmission, JobView
+from src.services.jobs import AircraftNotEnabledError, AirlineMismatchError
 
 router = APIRouter(prefix="/v1/jobs")
 
