@@ -60,7 +60,7 @@ src/
   config.py          Settings, the one environment-variable reader
   schemas.py         pydantic models: FlightPlan, JobView, model file
   controllers/       FastAPI routers: parse request, call one service, map result or error to HTTP
-  services/          business rules: tenant checks, job lifecycle, fuel pipeline
+  services/          business rules: tenants.py (registry), jobs.py (lifecycle), fuel.py (pipeline)
   repositories/      persistence: protocols.py (Protocols), postgres.py, files.py (models)
   clients/           external I/O: weather.py, clock.py (Protocol + real implementation each)
   worker.py          worker process: Procrastinate task → fuel service

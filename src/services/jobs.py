@@ -1,36 +1,22 @@
-from collections.abc import Mapping
 from hashlib import sha256
 
 from src.clients.clock import Clock
-from src.config import Tenant
 from src.repositories.protocols import JobRepository
 from src.schemas import JobSubmission, JobView
-
-
-class UnknownAirlineError(Exception):
-    """Caller named no airline, or one that is not configured."""
+from src.services.tenants import Tenants
 
 
 class AirlineMismatchError(Exception):
     """The plan belongs to another airline than the caller."""
 
 
-class AircraftNotEnabledError(Exception):
-    """The plan's aircraft type is not enabled for the caller's airline."""
-
-
 class JobService:
     """API side of jobs, scoped to the calling airline."""
 
-    def __init__(self, jobs: JobRepository, clock: Clock, tenants: Mapping[str, Tenant]) -> None:
+    def __init__(self, jobs: JobRepository, clock: Clock, tenants: Tenants) -> None:
         self._jobs = jobs
         self._clock = clock
         self._tenants = tenants
-
-    def authenticate(self, airline: str | None) -> str:
-        if airline is None or airline not in self._tenants:
-            raise UnknownAirlineError(f"unknown airline: {airline!r}")
-        return airline
 
     def ready(self) -> bool:
         return self._jobs.ping()
@@ -39,8 +25,7 @@ class JobService:
         plan = submission.payload
         if plan.airline != airline:
             raise AirlineMismatchError(f"plan airline {plan.airline!r} is not {airline!r}")
-        if plan.aircraft_type not in self._tenants[airline].aircraft_types:
-            raise AircraftNotEnabledError(f"aircraft type {plan.aircraft_type!r} not enabled")
+        self._tenants.check_aircraft(airline, plan.aircraft_type)
         # Hashed before departure_time defaults, so a retried POST without one finds its job.
         plan_key = sha256(submission.model_dump_json().encode()).hexdigest()
         latest = self._jobs.latest(airline, plan_key)

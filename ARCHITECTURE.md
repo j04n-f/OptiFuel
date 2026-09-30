@@ -276,6 +276,12 @@ hand in fakes:
 | `WeatherClient`: `winds(points)` | HTTP client, bearer token, 5 s timeout: `POST /winds` `{"points": [{latitude, longitude, altitude_ft, eta}]}` → `{"winds": [{speed_kt, from_deg}]}` | Fuel service (worker) |
 | `Clock`: `now()` | `datetime.now(UTC)` | Job and fuel services |
 
+Tenant rules have one home, the tenant registry (`services/tenants.py`, built from
+`Settings.tenants` at each composition root): `authenticate` (401), `check_aircraft` (422),
+`model_version`, `codes`. `current_airline`, the job service, `/v1/tenants` and worker startup all
+ask it; none reads `Settings.tenants` itself. Concrete, no Protocol: tests configure it through
+`Settings`.
+
 Job pipeline: `validate → check envelope → fetch winds → integrate → persist`. Each step is a
 plain function. A new filter is one more function in the list. A new job type is one registry
 entry (`type → payload model + Procrastinate task`). A new model family is one loader keyed by

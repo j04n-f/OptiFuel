@@ -15,6 +15,7 @@ from src.repositories.files import FileModelRepository
 from src.repositories.postgres import PostgresResultRepository, queue_app, queue_name
 from src.schemas import FlightPlan
 from src.services.fuel import FuelService
+from src.services.tenants import Tenants, UnknownAirlineError
 
 # Retries only errors a later attempt can clear; any other one fails the job at once.
 # `max_attempts` counts retries, so 2 means 3 attempts. Waits 5 s, then 25 s.
@@ -29,12 +30,14 @@ def main() -> None:
     """Worker for `OPTIFUEL_WORKER_AIRLINE`: its queue, its model, nothing else."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     settings = Settings()
-    airline = settings.worker_airline
-    if airline is None or airline not in settings.tenants:
-        sys.exit(f"OPTIFUEL_WORKER_AIRLINE {airline!r} is not a configured tenant")
+    tenants = Tenants(settings.tenants)
+    try:
+        airline = tenants.authenticate(settings.worker_airline)
+    except UnknownAirlineError as error:
+        sys.exit(f"OPTIFUEL_WORKER_AIRLINE: {error}")
     if settings.weather_url is None or settings.weather_token is None:
         sys.exit("OPTIFUEL_WEATHER_URL and OPTIFUEL_WEATHER_TOKEN are required")
-    version = settings.tenants[airline].model_version
+    version = tenants.model_version(airline)
     try:
         # Fail fast: without its own model the worker never starts, and jobs wait queued.
         model = FileModelRepository(settings.model_dir).load(airline, version)

@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from src.controllers.deps import AirlineDep, JobServiceDep
 from src.schemas import JobSubmission, JobView
-from src.services.jobs import AircraftNotEnabledError, AirlineMismatchError
+from src.services.jobs import AirlineMismatchError
+from src.services.tenants import AircraftNotEnabledError
 
 router = APIRouter(prefix="/v1/jobs")
 

@@ -10,6 +10,7 @@ from src.clients.clock import SystemClock
 from src.config import Settings
 from src.controllers import health, jobs, tenants
 from src.repositories.postgres import PostgresJobRepository, queue_app
+from src.services.tenants import Tenants
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -36,7 +37,7 @@ def create_app(settings: Settings) -> FastAPI:
             pool.close()
 
     app = FastAPI(title="OptiFuel", lifespan=lifespan)
-    app.state.settings = settings
+    app.state.tenants = Tenants(settings.tenants)
     app.state.clock = SystemClock()
     app.state.jobs = PostgresJobRepository(pool, queue)
     app.include_router(health.router)
