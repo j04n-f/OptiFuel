@@ -37,4 +37,4 @@ uv run pre-commit install      # git hooks
 - **pre-commit**: ruff, ty, zizmor (GitHub Actions security audit; SHA pins required via `.github/zizmor.yml`), `uv.lock` sync check, file hygiene, private-key detection.
 - **GitHub Actions** (`.github/workflows/ci.yml`): pre-commit, tests, Docker build; actions pinned by commit SHA. **Dependabot** bumps uv deps, actions (SHA + version comment), Docker base image weekly, 7-day cooldown.
 
-Rationale and rejected alternatives: [`REPORT.md`](REPORT.md).
+Architecture, decisions, rejected alternatives, and implementation plan: [`ARCHITECTURE.md`](ARCHITECTURE.md).

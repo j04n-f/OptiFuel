@@ -51,11 +51,33 @@ Caveman. Technical substance stays, fluff dies.
 **Where it goes:**
 
 - `exercise_1/`: `analysis.ipynb` holds the narrative and calls `cleanup.py`, `compute.py`, `plot.py`, where the logic lives. After every change, Run All and save so committed outputs match the code. Dead ends stay in, each under a markdown cell saying what was tried and why it was dropped: the assignment grades the decision trail. Here addition beats deletion.
-- `src/optifuel/`: the job processor service (exercise 2).
+- `src/optifuel/`: the job processor service (exercise 2), laid out as below. Design, decisions, and build plan: `ARCHITECTURE.md`; read it before changing the service's shape.
+
+```
+src/optifuel/
+  api.py             composition root: Settings → clients → repositories → services → FastAPI app
+  config.py          Settings, the one environment-variable reader
+  schemas.py         pydantic models: FlightPlan, JobView, model file
+  controllers/       FastAPI routers: parse request, call one service, map result or error to HTTP
+  services/          business rules: tenant checks, job lifecycle, fuel pipeline
+  repositories/      persistence: protocols.py (Protocols), postgres.py, files.py (models)
+  clients/           external I/O: weather.py, clock.py (Protocol + real implementation each)
+  worker.py          worker process: Procrastinate task → fuel service
+  migrate.py         one-shot: apply schema
+  cleanup.py         one-shot: retry stalled jobs, purge old ones
+  sql/schema.sql
+  static/index.html
+tests/
+  conftest.py        fakes for every repository and client; app fixture built through api.py
+  test_<feature>.py  one file per user-facing feature
+deploy/              compose.yaml, weather-stub/, helm/optifuel/, kind-smoke.sh
+```
+
+- **Layers**: calls flow controller → service → repository or client, one direction. Controllers hold HTTP only, services hold every business rule and import no FastAPI, repositories hold SQL and file access only.
 - **Tenant** scope: every event carries `airline`, and its model, config, and results are keyed by it. An unknown airline or a disabled aircraft type rejects the event with an explicit error; each tenant runs only its own model, with no default or shared fallback.
 - Flight plans enter as pydantic models, validated at the boundary. `pickle` / `joblib` load only trusted artifacts: the provided datasets and models from the configured per-airline path.
 - Config is one `pydantic-settings` class read at startup, the only place an environment variable is read. Credentials are `SecretStr`.
-- Dependency injection by default: every I/O **seam** (weather API, model store, result store, clock) is a `Protocol` passed in through a constructor argument or a FastAPI dependency, so tests hand in a fake. Real clients are built once at startup, next to the config, and passed down from there.
+- **Dependency injection** by default: every service, repository, and client takes its dependencies as constructor arguments typed by a `Protocol`. `api.py` builds the real ones once at startup, next to the config, and controllers receive services through FastAPI `Depends`, so tests hand in fakes.
 
 **Commits:** conventional commits, imperative lowercase subject, 72 columns.
 
@@ -63,9 +85,10 @@ Caveman. Technical substance stays, fluff dies.
 
 **Tests:**
 
-- Drive a public seam: the app through `TestClient`, or the processor's entry function with fakes injected. Assert what a consumer observes: status and body, what the result store recorded, what the weather API was asked.
+- **End-to-end first**: drive the app over HTTP through `TestClient`, wired by `api.py`, with fakes only at the outer edge (repositories, clients). A job test submits with `POST /v1/jobs`, the fake queue runs the worker task inline, and `GET /v1/jobs/{id}` reads the outcome. A unit test is for pure logic whose edge cases HTTP cannot reach cheaply (fuel integration math).
+- **Black box**: assert what a user observes: status code, response body, what the weather API was asked. A test survives any refactor that keeps behaviour; one that breaks on a rename or a moved function is testing implementation, and gets rewritten.
 - Red first: the test fails, then the code turns it green. A bug fix lands with the test that failed first.
-- Tests run offline. Fakes are small hand-written classes that satisfy the seam's `Protocol`, typed so ty flags them when the seam changes; they live as fixtures in `tests/conftest.py`, and FastAPI dependencies swap through `app.dependency_overrides`.
+- Tests run offline. Fakes are small hand-written classes that satisfy the seam's `Protocol`, typed so ty flags them when the seam changes; they live as fixtures in `tests/conftest.py` and enter through `app.dependency_overrides`.
 - Mocks need a reason: `unittest.mock`, `pytest-mock`, and `monkeypatch` of internals are a last resort for code no seam reaches, and every mock is one more copy of an interface to maintain. Refactor to a seam first; if a mock still lands, a comment names why the seam was impossible.
 - Name tests by behaviour (`test_rejects_unknown_airline`). Variants of one behaviour are one `@pytest.mark.parametrize` list.
 - Body is arrange / act / assert, blocks split by one blank line, no section comments.
