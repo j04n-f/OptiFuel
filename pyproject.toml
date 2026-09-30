@@ -6,15 +6,12 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.142.1",
-    "httpx2>=2.13.1",
-    "pandas>=3.0.6",
-    "pydantic-settings>=2.15.0",
-    "scikit-learn>=1.9.1",
     "uvicorn[standard]>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.13.1",
     "pandas-stubs>=3.0.5.260914",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
@@ -26,6 +23,8 @@ analysis = [
     "ipykernel>=7.4.0",
     "jupyterlab>=4.6.4",
     "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
 ]
 
 [build-system]
@@ -40,7 +39,7 @@ module-name = "optifuel"
 
 [tool.ruff]
 line-length = 100
-extend-include = ["*.ipynb"]
+src = [".", "src", "exercise_1"]  # notebook imports cleanup/compute/plot as first-party
 
 [tool.ruff.lint]
 select = [
@@ -63,10 +62,13 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]  # assert is the point of tests
-"*.ipynb" = ["E402", "S301"]  # imports mid-notebook; dataset is provided as pickle
+"exercise_1/**" = ["S301"]  # dataset is provided as pickle
 
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--cov=optifuel", "--cov-report=term-missing"]
 testpaths = ["tests"]
 xfail_strict = true
 filterwarnings = ["error"]  # surface deprecations before they break
+
+[tool.ty.environment]
+extra-paths = ["exercise_1"]  # notebook imports cleanup/compute/plot from its own folder
