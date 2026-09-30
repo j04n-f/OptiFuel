@@ -1,67 +1,75 @@
 import logging
 import sys
-from typing import Any
+from dataclasses import dataclass
 
 import httpx2
 import procrastinate
-import psycopg
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from src.clients.clock import SystemClock
-from src.clients.weather import HttpWeatherClient, WeatherUnavailableError
+from src.clients.weather import HttpWeatherClient
 from src.config import Settings
 from src.repositories.files import FileModelRepository
-from src.repositories.postgres import PostgresResultRepository, queue_app, queue_name
-from src.schemas import FlightPlan
+from src.repositories.postgres import PostgresJobStore
 from src.services.fuel import FuelService
-
-# Retries only errors a later attempt can clear; any other one fails the job at once.
-# `max_attempts` counts retries, so 2 means 3 attempts. Waits 5 s, then 25 s.
-RETRY = procrastinate.RetryStrategy(
-    max_attempts=2,
-    exponential_wait=5,
-    retry_exceptions={WeatherUnavailableError, psycopg.OperationalError},
-)
+from src.services.jobs import queue_app, queue_name, register_fuel_estimate
+from src.services.tenants import Tenants, UnknownAirlineError
 
 
-def main() -> None:
-    """Worker for `OPTIFUEL_WORKER_AIRLINE`: its queue, its model, nothing else."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    settings = Settings()
-    airline = settings.worker_airline
-    if airline is None or airline not in settings.tenants:
-        sys.exit(f"OPTIFUEL_WORKER_AIRLINE {airline!r} is not a configured tenant")
+class WorkerStartupError(Exception):
+    """The worker cannot serve its airline. It refuses to start; jobs wait queued."""
+
+
+@dataclass(frozen=True)
+class Worker:
+    airline: str
+    app: procrastinate.App
+    pool: ConnectionPool
+
+    def run(self) -> None:
+        with self.pool:
+            self.app.run_worker(queues=[queue_name(self.airline)], name=f"worker-{self.airline}")
+
+
+def build(settings: Settings) -> Worker:
+    """Worker for `OPTIFUEL_WORKER_AIRLINE`: its queue, its model, nothing else. Opens nothing."""
+    tenants = Tenants(settings.tenants)
+    try:
+        airline = tenants.authenticate(settings.worker_airline)
+    except UnknownAirlineError as error:
+        raise WorkerStartupError(f"OPTIFUEL_WORKER_AIRLINE: {error}") from error
     if settings.weather_url is None or settings.weather_token is None:
-        sys.exit("OPTIFUEL_WEATHER_URL and OPTIFUEL_WEATHER_TOKEN are required")
-    version = settings.tenants[airline].model_version
+        raise WorkerStartupError("OPTIFUEL_WEATHER_URL and OPTIFUEL_WEATHER_TOKEN are required")
+    version = tenants.model_version(airline)
     try:
         # Fail fast: without its own model the worker never starts, and jobs wait queued.
         model = FileModelRepository(settings.model_dir).load(airline, version)
     except (OSError, ValueError, ValidationError) as error:
-        sys.exit(f"no usable model {version} for {airline}: {error}")
+        raise WorkerStartupError(f"no usable model {version} for {airline}: {error}") from error
 
     url = settings.database_url.get_secret_value()
     # One connection: the worker runs one job at a time (Procrastinate's default concurrency).
     pool = ConnectionPool(
         url, min_size=1, max_size=1, open=False, check=ConnectionPool.check_connection
     )
+    app = queue_app(procrastinate.PsycopgConnector(conninfo=url))
     weather = HttpWeatherClient(
         str(settings.weather_url), settings.weather_token.get_secret_value(), httpx2.HTTPTransport()
     )
-    service = FuelService(model, weather, PostgresResultRepository(pool), SystemClock())
-    queue = queue_app(procrastinate.PsycopgConnector(conninfo=url))
+    register_fuel_estimate(
+        app, FuelService(model, weather, PostgresJobStore(pool, app), SystemClock())
+    )
+    return Worker(airline, app, pool)
 
-    # Sync task: Procrastinate runs it in a thread, off the worker's event loop.
-    @queue.task(name="fuel_estimate", pass_context=True, retry=RETRY)
-    def fuel_estimate(context: procrastinate.JobContext, flight_plan: dict[str, Any]) -> None:
-        job_id = context.job.id
-        if job_id is None:
-            raise ValueError("a claimed job always has an id")
-        service.estimate(job_id, FlightPlan.model_validate(flight_plan))
 
-    with pool:
-        queue.run_worker(queues=[queue_name(airline)], name=f"worker-{airline}")
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    try:
+        worker = build(Settings())
+    except WorkerStartupError as error:
+        sys.exit(str(error))
+    worker.run()
 
 
 if __name__ == "__main__":

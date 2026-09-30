@@ -1,8 +1,9 @@
 # OptiFuel architecture
 
 OptiFuel receives airline flight plans as events, estimates route fuel with each airline's own
-model, and stores the result. This document holds the decisions, the design, and the
-implementation plan for exercise 2 (proof of concept, production-minded).
+model, and stores the result. This document describes the system as built: shape, decisions, job
+contract, data model, tenant isolation, fuel computation, seams, configuration, scaling and
+failure behaviour. Setup, commands and deployment steps: `README.md`.
 
 Guiding rule: least machinery that meets the brief. Every "not now" below names the trigger that
 would bring it in.
@@ -72,6 +73,7 @@ flowchart LR
 | D10 | One static HTML page served by FastAPI. | SPA with a build chain; PgQueuer-style ops dashboard. | Launch + track is one form and one table. No build tooling, same image. |
 | D11 | Helm chart for Kubernetes; docker compose for local dev; kind smoke script. | Kustomize; compose only. | Helm's `range` over `tenants` renders per-airline resources from one list. |
 | D12 | Logs with `job_id` and `airline`, `/health`, `/ready`. | Metrics/tracing in the MVP. | Enough to operate a PoC. Metrics are the first addition (§10). |
+| D13 | Duplicate = same plan key while its job is still queued, enforced by the queue's `queueing_lock` alone. Once claimed, the same plan makes a new job. | Application-level "latest unfinished job for this plan" check; reusing finished jobs. | One implementation of "same plan" (the lock's partial unique index). Reusing a finished estimate serves stale winds, a safety risk (D8). A duplicate estimate during the ~1 s a job runs costs one weather call. |
 
 **When Kafka earns its place**: several independent consumers of flight-plan events, a replay or
 audit-stream requirement, or joining an existing event backbone. The ingress adapter then
@@ -130,8 +132,9 @@ stateDiagram-v2
     failed --> [*]: purged after 30 d
 ```
 
-Procrastinate status maps to the contract: `todo → queued`, `doing → running`, `succeeded`,
-`failed`. `cancelled` and `aborted` are unreachable: there is no cancel endpoint.
+Procrastinate status maps to the contract in the job queue module: `todo → queued`,
+`doing → running`, `succeeded`, `failed`. `cancelled` and `aborted` are unreachable: there is no
+cancel endpoint.
 
 - **Transient**: weather timeout, connection error or 5xx (the client raises
   `WeatherUnavailableError`); Postgres `OperationalError`. Retried via
@@ -141,9 +144,10 @@ Procrastinate status maps to the contract: `todo → queued`, `doing → running
   malformed reply. Fail at once. A missing model never reaches a job: the worker refuses to
   start (§5).
 - **Dead letters**: `failed` jobs with their `error`. Resubmitting the same plan creates a new job.
-- **Duplicates**: `plan_key = sha256(canonical payload)`. The API returns the airline's latest
-  job with that key unless it failed. `queueing_lock = "{airline}:{plan_key}"` catches two
-  identical requests racing; `AlreadyEnqueued` resolves to the existing job.
+- **Duplicates** (D13): `plan_key = sha256(canonical payload)`, hashed before `departure_time`
+  defaults. The defer carries `queueing_lock = "{airline}:{plan_key}"`; while a job holding it is
+  still queued, Procrastinate raises `AlreadyEnqueued` and the API answers with that job's id.
+  Once claimed, whatever its outcome, the same plan queues a new job.
 
 ### Submit → result
 
@@ -270,11 +274,29 @@ hand in fakes:
 
 | Seam | Real implementation | Used by |
 |---|---|---|
-| `JobRepository`: `ping`, `submit`, `latest`, `get`, `recent` (reads scoped to one airline) | Procrastinate defer + SQL on `job_records ⋈ procrastinate_jobs` | Job service (API) |
-| `ResultRepository`: `record_success`, `record_error` | SQL on `job_records` | Fuel service (worker) |
+| `JobStore`: `ping`, `submit`, `get`, `recent`, `queued`, `record_success`, `record_error` (reads scoped to one airline; rows carry the queue's raw status) | Procrastinate defer + SQL on `job_records ⋈ procrastinate_jobs` | Job queue (API), fuel service (worker) |
+| Procrastinate connector (the library's own seam) | `PsycopgConnector` / `SyncPsycopgConnector`; `InMemoryConnector` in tests | Job queue |
 | `FileModelRepository`: `load(airline, version)`, concrete; the Protocol lands with a second source (§10) | JSON file under `OPTIFUEL_MODEL_DIR` | Worker startup: loads its airline's model once and hands it to the fuel service |
 | `WeatherClient`: `winds(points)` | HTTP client, bearer token, 5 s timeout: `POST /winds` `{"points": [{latitude, longitude, altitude_ft, eta}]}` → `{"winds": [{speed_kt, from_deg}]}` | Fuel service (worker) |
-| `Clock`: `now()` | `datetime.now(UTC)` | Job and fuel services |
+| `Clock`: `now()` | `datetime.now(UTC)` | Job queue and fuel service |
+
+The job queue module (`services/jobs.py`) owns everything the queue means: the Procrastinate App
+(`queue_app`), the `fuel_estimate` task and its retry strategy (`register_fuel_estimate`), queue
+naming, the status mapping, plan identity (D13), and the API-side `JobQueue` (submit, get,
+recent, ready). `api.py`, `worker.py`, `cleanup.py` and the tests import it; nothing else
+constructs an App or names a queue. Tests run the real task and retry strategy on Procrastinate's
+`InMemoryConnector`, with the `JobStore` fake composing rows from the connector's jobs; the SQL
+adapter is exercised by the compose and kind smokes only.
+
+`worker.py` splits `build(settings)`, which checks tenant, weather config and model and raises
+`WorkerStartupError` without opening a connection, from `Worker.run()`, so the fail-fast contract
+(§5, §8) is tested offline.
+
+Tenant rules have one home, the tenant registry (`services/tenants.py`, built from
+`Settings.tenants` at each composition root): `authenticate` (401), `check_aircraft` (422),
+`model_version`, `codes`. `current_airline`, the job service, `/v1/tenants` and worker startup all
+ask it; none reads `Settings.tenants` itself. Concrete, no Protocol: tests configure it through
+`Settings`.
 
 Job pipeline: `validate → check envelope → fetch winds → integrate → persist`. Each step is a
 plain function. A new filter is one more function in the list. A new job type is one registry
@@ -381,52 +403,21 @@ no build:
 | Weather cache | Weather API rate limits or cost |
 | Job cancel endpoint | Long-running job types |
 
-## 11. Repository layout
+## 11. Packaging
 
-Folder structure and layer rules: `AGENTS.md`, "Where it goes".
+One image ships every process (§7). Two ways to run it:
 
-## 12. Implementation plan
-
-Each step ends green on `uv run pre-commit run --all-files` and `uv run pytest`. Tests run
-offline with fakes (tests red first).
-
-1. **Dependencies.** `uv add procrastinate` (`pydantic-settings` landed with the skeleton), plus
-   the weather HTTP client as a runtime dep (`httpx2`, already in the lock for tests). Confirm the
-   Procrastinate atomic-defer API (§4).
-2. **Schemas and fuel service.** `FlightPlan`, model schema, envelope check, fuel integration.
-   Unit test only the integration math (headwind raises fuel versus calm air).
-3. **Config and seams.** Extend `Settings` and the `conftest.py` app fixture (both from the
-   skeleton); repository and client Protocols, fakes in `conftest.py`.
-4. **Controllers and job service.** Job routes, `current_airline`, rejections, `/ready`,
-   `/v1/tenants`, wired in `api.py`.
-   *Check (end-to-end):* one parametrized `test_rejects_invalid_submission` (401 / 403 / 422
-   cases) and `test_hides_other_airlines_jobs` (404).
-5. **Queue and worker.** Procrastinate app, `fuel_estimate` task with retry strategy, Postgres
-   repositories, `worker.py`, `migrate.py`, `cleanup.py`, `sql/schema.sql`.
-   *Check (end-to-end, POST then GET):* `test_estimates_route_fuel` (succeeded, fuel in body,
-   weather asked for every waypoint) and `test_fails_permanent_error_on_first_attempt`.
-6. **Static page.** `index.html` served at `/`.
-7. **Compose.** `docker-compose.yaml` (repo root): postgres (official image, tag+digest), migrate
-   (one-shot), api, worker-abc, worker-xyz (each mounts only its model), cleanup (a 5-minute loop
-   standing in for the CronJob), WireMock weather stub, and seed (one-shot, `scripts/seed.py`,
-   mounted since dev tooling stays out of the image): a fake `DEMO` tenant with no model or
-   worker, holding one job in each status so the page shows them all.
-   *Check:* `docker compose up`, submit via the page as ABC, see `succeeded`; ABC's job is 404 for
-   XYZ; DEMO lists queued, running, succeeded and failed.
-8. **Helm.** `deploy/helm/optifuel`: API Deployment/Service/HPA, per-tenant worker Deployment +
-   ConfigMap + ScaledObject (`keda.enabled`), migrate hook Job, cleanup CronJob, Secret refs.
-   `values-kind.yaml` enables a Postgres StatefulSet (official image) and the WireMock stub.
-   The Secret is created outside the chart. Model files and the stub mapping enter with
-   `--set-file`, since a chart reads no file outside its directory. In-chart Postgres is a
-   `pre-install` hook so it exists before the migrate hook. No Ingress template: the cluster's
-   ingress fronts `optifuel-api`; the smoke port-forwards.
-9. **Kind smoke.** `deploy/kind-smoke.sh`: create cluster, install KEDA, build and load the image,
-   `helm install -f values-kind.yaml`, submit a plan, poll until `succeeded`. With the stub held
-   past the client timeout, 12 distinct ABC plans (targetQueueLength 10 plus the HPA's 10%
-   tolerance) scale `optifuel-worker-abc` past one replica. Delete a worker pod mid-run and
-   confirm the job still completes. The stub is slowed to 3 s and the pod gets 1 s to stop, so
-   the job dies running; cleanup requeues it and it ends `succeeded` on attempt 2.
-   Last, `keda.enabled=false` leaves each worker at its min replicas.
-10. **Docs.** README command table: compose, kind smoke, worker command. CI stays three jobs; the
-    Docker job builds the image and checks `/health`, the static page at `/`, and that
-    `src/sql/schema.sql` is packaged.
+- **docker compose** (`docker-compose.yaml`, local): postgres (official image, tag + digest),
+  migrate (one-shot), api, worker-abc and worker-xyz (each mounts only its own model directory),
+  cleanup (a 5-minute loop standing in for the CronJob), a WireMock weather stub
+  (`deploy/weather-stub/`), and seed (one-shot, `scripts/seed.py` mounted since dev tooling stays
+  out of the image): a fake `DEMO` tenant with no model or worker, holding one job in each status
+  so the page shows them all.
+- **Helm** (`deploy/helm/optifuel`): API Deployment + Service + HPA, per-tenant worker Deployment +
+  model ConfigMap + ScaledObject (`keda.enabled`), migrate hook Job, cleanup CronJob, Secret
+  references. The Secret (`database-url`, `weather-token`) is created outside the chart. Model
+  files and the stub mapping enter with `--set-file`, since a chart reads no file outside its
+  directory. No Ingress template: the cluster's ingress fronts `optifuel-api`.
+  `values-kind.yaml` enables an in-chart Postgres StatefulSet, installed as a `pre-install` hook
+  so it exists before the migrate hook, and the WireMock stub; `deploy/kind-smoke.sh` exercises
+  the chart end to end on kind (§8 behaviours: backlog scaling, worker death mid-job, KEDA off).

@@ -14,8 +14,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from src.config import Settings
-from src.repositories.postgres import queue_name
 from src.schemas import FlightPlan, FuelResult, Waypoint
+from src.services.jobs import queue_name
 
 AIRLINE = "DEMO"
 MODEL_VERSION = "2026-09-30"

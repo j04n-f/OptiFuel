@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import timedelta
 
 import pytest
@@ -14,17 +15,23 @@ from tests.conftest import (
     waypoint,
 )
 
+NORTHBOUND = (waypoint(0, 0, 200, 5000), waypoint(1, 0, 200, 5000))
 
-def test_estimates_route_fuel(client: TestClient, weather: FakeWeather) -> None:
+
+def test_estimates_route_fuel(
+    client: TestClient, weather: FakeWeather, run_workers: Callable[[], None]
+) -> None:
     plan = flight_plan(
         waypoint(0, 0, 200, 5000), waypoint(1, 0, 150, 4000), waypoint(1, 1, 150, 4000)
     )
 
     submitted = client.post("/v1/jobs", json=plan)
+    run_workers()
     job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
 
     assert submitted.status_code == 202
     assert job["status"] == "succeeded"
+    assert job["attempts"] == 1
     assert job["flight_id"] == 123
     assert job["error"] is None
     assert job["result"] == {
@@ -44,18 +51,52 @@ def test_estimates_route_fuel(client: TestClient, weather: FakeWeather) -> None:
     )
 
 
-def test_departs_at_received_time_by_default(
-    client: TestClient, weather: FakeWeather, clock: FakeClock
+def test_shows_job_queued_until_a_worker_claims_it(
+    client: TestClient, run_workers: Callable[[], None]
 ) -> None:
-    plan = flight_plan(waypoint(0, 0, 200, 5000), waypoint(1, 0, 200, 5000), departure_time=None)
+    submitted = client.post("/v1/jobs", json=flight_plan(*NORTHBOUND))
+
+    queued = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
+    run_workers()
+    done = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
+
+    assert (queued["status"], queued["attempts"], queued["result"]) == ("queued", 0, None)
+    assert (done["status"], done["attempts"]) == ("succeeded", 1)
+
+
+def test_departs_at_received_time_by_default(
+    client: TestClient,
+    weather: FakeWeather,
+    clock: FakeClock,
+    run_workers: Callable[[], None],
+) -> None:
+    plan = flight_plan(*NORTHBOUND, departure_time=None)
 
     submitted = client.post("/v1/jobs", json=plan)
+    run_workers()
     job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
 
     assert job["status"] == "succeeded"
     assert job["submitted_at"] == "2026-09-30T09:00:00Z"
     [asked] = weather.calls
     assert asked[0].eta == clock.current
+
+
+def test_headwind_raises_fuel_over_calm_air(
+    client: TestClient, weather: FakeWeather, run_workers: Callable[[], None]
+) -> None:
+    calm = client.post("/v1/jobs", json=flight_plan(*NORTHBOUND, flight_id=1)).json()["id"]
+    run_workers()
+    weather.wind = Wind(speed_kt=20, from_deg=0)
+
+    against = client.post("/v1/jobs", json=flight_plan(*NORTHBOUND, flight_id=2)).json()["id"]
+    run_workers()
+
+    still = client.get(f"/v1/jobs/{calm}").json()["result"]
+    headwind = client.get(f"/v1/jobs/{against}").json()["result"]
+    # Ground speed drops from 200 to 200 - 20 kt * 1.852 = 162.96 km/h over the same distance.
+    assert headwind["total_fuel_lb"] == pytest.approx(still["total_fuel_lb"] * 200 / 162.96)
+    assert headwind["distance_km"] == still["distance_km"]
 
 
 @pytest.mark.parametrize(
@@ -82,6 +123,7 @@ def test_departs_at_received_time_by_default(
 def test_fails_permanent_error_on_first_attempt(
     client: TestClient,
     weather: FakeWeather,
+    run_workers: Callable[[], None],
     plan: dict[str, object],
     failures: list[Exception],
     error: str,
@@ -90,6 +132,7 @@ def test_fails_permanent_error_on_first_attempt(
     weather.failures = list(failures)
 
     submitted = client.post("/v1/jobs", json=plan)
+    run_workers()
     job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
 
     assert job["status"] == "failed"
@@ -102,13 +145,14 @@ def test_fails_permanent_error_on_first_attempt(
         assert weather.calls == []
 
 
-def test_fails_on_non_positive_ground_speed(client: TestClient, weather: FakeWeather) -> None:
+def test_fails_on_non_positive_ground_speed(
+    client: TestClient, weather: FakeWeather, run_workers: Callable[[], None]
+) -> None:
     # Northbound leg: wind from 0° is a headwind, and 200 kt exceeds 200 km/h airspeed.
     weather.wind = Wind(speed_kt=200, from_deg=0)
 
-    submitted = client.post(
-        "/v1/jobs", json=flight_plan(waypoint(0, 0, 200, 5000), waypoint(1, 0, 200, 5000))
-    )
+    submitted = client.post("/v1/jobs", json=flight_plan(*NORTHBOUND))
+    run_workers()
     job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
 
     assert job["status"] == "failed"
@@ -118,13 +162,14 @@ def test_fails_on_non_positive_ground_speed(client: TestClient, weather: FakeWea
 
 
 def test_fails_after_three_attempts_while_weather_is_unavailable(
-    client: TestClient, weather: FakeWeather
+    client: TestClient, weather: FakeWeather, run_workers: Callable[[], None]
 ) -> None:
     weather.failures = [
         WeatherUnavailableError(f"weather API answered {s}") for s in (503, 502, 504)
     ]
 
     submitted = client.post("/v1/jobs", json=flight_plan(IN_ENVELOPE, IN_ENVELOPE))
+    run_workers()
     job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
 
     assert job["status"] == "failed"
@@ -134,10 +179,13 @@ def test_fails_after_three_attempts_while_weather_is_unavailable(
     assert len(weather.calls) == 3
 
 
-def test_succeeds_on_retry_once_weather_recovers(client: TestClient, weather: FakeWeather) -> None:
+def test_succeeds_on_retry_once_weather_recovers(
+    client: TestClient, weather: FakeWeather, run_workers: Callable[[], None]
+) -> None:
     weather.failures = [WeatherUnavailableError("weather API answered 503")]
 
     submitted = client.post("/v1/jobs", json=flight_plan(IN_ENVELOPE, IN_ENVELOPE))
+    run_workers()
     job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
 
     assert job["status"] == "succeeded"
@@ -170,12 +218,20 @@ ABC = {"X-Airline": "ABC"}
     ],
 )
 def test_rejects_invalid_submission(
-    app: FastAPI, weather: FakeWeather, headers: dict[str, str], body: object, status: int
+    app: FastAPI,
+    weather: FakeWeather,
+    run_workers: Callable[[], None],
+    headers: dict[str, str],
+    body: object,
+    status: int,
 ) -> None:
     with TestClient(app, headers=headers) as client:
         response = client.post("/v1/jobs", json=body)
+        run_workers()
+        listed = client.get("/v1/jobs", headers=ABC).json()
 
     assert response.status_code == status
+    assert listed == []
     assert weather.calls == []
 
 
@@ -187,10 +243,11 @@ def test_rejects_invalid_submission(
         pytest.param("2026-09-30T10:00:00Z", "2026-09-30T12:00:00+02:00", id="same instant"),
     ],
 )
-def test_returns_existing_job_for_resubmitted_plan(
+def test_returns_queued_job_for_resubmitted_plan(
     client: TestClient,
     weather: FakeWeather,
     clock: FakeClock,
+    run_workers: Callable[[], None],
     first_departure: str | None,
     again_departure: str | None,
 ) -> None:
@@ -198,18 +255,36 @@ def test_returns_existing_job_for_resubmitted_plan(
     clock.current += timedelta(hours=1)
 
     again = client.post("/v1/jobs", json=flight_plan(V, V, departure_time=again_departure))
+    run_workers()
 
     assert again.status_code == 202
     assert again.json() == first.json()
+    assert len(client.get("/v1/jobs").json()) == 1
     assert len(weather.calls) == 1
 
 
-def test_queues_new_job_when_same_plan_failed(client: TestClient, weather: FakeWeather) -> None:
+@pytest.mark.parametrize(
+    ("failures", "earlier_status"),
+    [
+        pytest.param([], "succeeded", id="succeeded"),
+        pytest.param([ValueError("malformed weather reply")], "failed", id="failed"),
+    ],
+)
+def test_queues_new_job_once_same_plan_was_claimed(
+    client: TestClient,
+    weather: FakeWeather,
+    run_workers: Callable[[], None],
+    failures: list[Exception],
+    earlier_status: str,
+) -> None:
     plan = flight_plan(V, V)
-    weather.failures = [ValueError("malformed weather reply")]
-    failed = client.post("/v1/jobs", json=plan).json()["id"]
+    weather.failures = list(failures)
+    earlier = client.post("/v1/jobs", json=plan).json()["id"]
+    run_workers()
 
     again = client.post("/v1/jobs", json=plan).json()["id"]
+    run_workers()
 
-    assert again != failed
+    assert again != earlier
+    assert client.get(f"/v1/jobs/{earlier}").json()["status"] == earlier_status
     assert client.get(f"/v1/jobs/{again}").json()["status"] == "succeeded"

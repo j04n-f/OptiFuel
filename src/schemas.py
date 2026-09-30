@@ -48,12 +48,15 @@ class FuelResult(BaseModel):
     model_version: str
 
 
+JobStatus = Literal["queued", "running", "succeeded", "failed"]
+
+
 class JobView(BaseModel):
     id: int
     type: str
     airline: str
     flight_id: int
-    status: Literal["queued", "running", "succeeded", "failed"]
+    status: JobStatus
     attempts: int
     submitted_at: datetime
     finished_at: datetime | None = None

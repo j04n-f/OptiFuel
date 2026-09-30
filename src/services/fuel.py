@@ -5,7 +5,7 @@ from math import asin, atan2, cos, degrees, exp, radians, sin, sqrt
 
 from src.clients.clock import Clock
 from src.clients.weather import WeatherClient, Wind, WindQuery
-from src.repositories.protocols import ResultRepository
+from src.repositories.protocols import JobStore
 from src.schemas import FlightPlan, FuelModel, FuelResult, Waypoint
 
 EARTH_RADIUS_KM = 6371.0
@@ -20,11 +20,11 @@ class FuelService:
     """Worker side of `fuel_estimate`, bound to one airline's model."""
 
     def __init__(
-        self, model: FuelModel, weather: WeatherClient, results: ResultRepository, clock: Clock
+        self, model: FuelModel, weather: WeatherClient, store: JobStore, clock: Clock
     ) -> None:
         self._model = model
         self._weather = weather
-        self._results = results
+        self._store = store
         self._clock = clock
 
     def estimate(self, job_id: int, plan: FlightPlan) -> None:
@@ -40,9 +40,9 @@ class FuelService:
                 if isinstance(error, FuelEstimateError)
                 else f"{type(error).__name__}: {error}"
             )
-            self._results.record_error(job_id, message, self._clock.now())
+            self._store.record_error(job_id, message, self._clock.now())
             raise
-        self._results.record_success(job_id, result, self._clock.now())
+        self._store.record_success(job_id, result, self._clock.now())
 
     def _estimate(self, waypoints: Sequence[Waypoint], departure: datetime) -> FuelResult:
         # Before the weather call: extrapolating the model could underestimate fuel.
