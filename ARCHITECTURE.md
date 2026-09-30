@@ -85,7 +85,7 @@ consumes a topic and defers jobs exactly like the HTTP handler. Workers don't ch
 |---|---|---|
 | `POST` | `/v1/jobs` | `202 {"id": ...}`, or the existing job's id for a duplicate plan |
 | `GET` | `/v1/jobs/{id}` | Job view below; `404` if missing or owned by another airline |
-| `GET` | `/v1/jobs?limit=50` | Caller's airline's jobs, newest first |
+| `GET` | `/v1/jobs?limit=50` | Caller's airline's jobs, newest first; `limit` 1..100, default 50 |
 | `GET` | `/v1/tenants` | Configured airline codes, for the page's selector. `ponytail:` exists only because auth is mocked; removed with real auth. |
 | `GET` | `/health` | Liveness: process up |
 | `GET` | `/ready` | Readiness: `SELECT 1` against Postgres |

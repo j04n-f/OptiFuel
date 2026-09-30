@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.clients.weather import WeatherUnavailableError
+from src.clients.weather import WeatherUnavailableError, Wind
 from tests.conftest import (
     DEPARTURE,
     IN_ENVELOPE,
@@ -59,7 +59,7 @@ def test_departs_at_received_time_by_default(
 
 
 @pytest.mark.parametrize(
-    ("plan", "failures", "error"),
+    ("plan", "failures", "error", "calls_weather"),
     [
         pytest.param(
             flight_plan(
@@ -67,12 +67,14 @@ def test_departs_at_received_time_by_default(
             ),
             [],
             "out_of_envelope: waypoints 1, 2",
+            False,
             id="out of envelope",
         ),
         pytest.param(
             flight_plan(IN_ENVELOPE, IN_ENVELOPE),
             [ValueError("malformed weather reply")],
             "ValueError: malformed weather reply",
+            True,
             id="bad weather reply",
         ),
     ],
@@ -83,6 +85,7 @@ def test_fails_permanent_error_on_first_attempt(
     plan: dict[str, object],
     failures: list[Exception],
     error: str,
+    calls_weather: bool,
 ) -> None:
     weather.failures = list(failures)
 
@@ -93,6 +96,25 @@ def test_fails_permanent_error_on_first_attempt(
     assert job["attempts"] == 1
     assert job["result"] is None
     assert job["error"] == error
+    if calls_weather:
+        assert len(weather.calls) == 1
+    else:
+        assert weather.calls == []
+
+
+def test_fails_on_non_positive_ground_speed(client: TestClient, weather: FakeWeather) -> None:
+    # Northbound leg: wind from 0° is a headwind, and 200 kt exceeds 200 km/h airspeed.
+    weather.wind = Wind(speed_kt=200, from_deg=0)
+
+    submitted = client.post(
+        "/v1/jobs", json=flight_plan(waypoint(0, 0, 200, 5000), waypoint(1, 0, 200, 5000))
+    )
+    job = client.get(f"/v1/jobs/{submitted.json()['id']}").json()
+
+    assert job["status"] == "failed"
+    assert job["attempts"] == 1
+    assert "non_positive_ground_speed" in job["error"]
+    assert len(weather.calls) == 1
 
 
 def test_fails_after_three_attempts_while_weather_is_unavailable(

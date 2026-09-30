@@ -62,17 +62,19 @@ class FakeClock:
 
 
 class FakeWeather:
-    """Raises the next of `failures` per call, then answers calm air; records each batched call."""
+    """Raises the next of `failures` per call, then answers `wind` (default calm);
+    records each batched call."""
 
     def __init__(self) -> None:
         self.calls: list[list[WindQuery]] = []
         self.failures: list[Exception] = []
+        self.wind = Wind(speed_kt=0, from_deg=0)
 
     def winds(self, points: Sequence[WindQuery]) -> list[Wind]:
         self.calls.append(list(points))
         if self.failures:
             raise self.failures.pop(0)
-        return [Wind(speed_kt=0, from_deg=0)] * len(points)
+        return [self.wind] * len(points)
 
 
 class FakeJobs:
