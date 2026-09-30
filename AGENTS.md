@@ -66,7 +66,7 @@ src/optifuel/
   migrate.py         one-shot: apply schema
   cleanup.py         one-shot: retry stalled jobs, purge old ones
   sql/schema.sql
-  static/index.html
+  static/            index.html, style.css, app.js
 tests/
   conftest.py        fakes for every repository and client; app fixture built through api.py
   test_<feature>.py  one file per user-facing feature

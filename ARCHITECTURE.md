@@ -344,7 +344,8 @@ worker count pushes connection limits.
 
 ## 9. Frontend
 
-`src/optifuel/static/index.html`, served at `/`. One file, inline JS, no framework, no build:
+`src/optifuel/static/`, served at `/`: `index.html` (markup), `style.css`, `app.js`. No framework,
+no build:
 
 - Airline selector (from `GET /v1/tenants`), sent as `X-Airline`; the page's accent colour follows
   the airline.
