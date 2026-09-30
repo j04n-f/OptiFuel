@@ -38,7 +38,7 @@ Caveman. Technical substance stays, fluff dies.
 
 # Before pushing
 
-`README.md` is the command table; `pyproject.toml` holds every tool's config. Done means CI's three jobs pass locally: `uv run pre-commit run --all-files` (Lint: ruff, ty, zizmor, uv-lock, file hygiene), `uv run pytest` (Test), and the image builds, answers `/health` and `/`, and ships `src/sql/schema.sql` (Docker).
+`README.md` is the command table; `pyproject.toml` holds every tool's config. Done means CI's three jobs pass locally: `uv run pre-commit run --all-files` (Lint: ruff, ty, zizmor, uv-lock, file hygiene), `uv run pytest` (Test), and the image builds (Docker).
 
 - **Warnings are errors** (`filterwarnings = ["error"]`). Fix a deprecation at its cause, the way `httpx2` replaced `httpx` for Starlette's `TestClient`; a warning filter needs the user's OK.
 - **Suppressions** name the rule and the reason: `# noqa: S301  provided dataset`, `# ty: ignore[<rule>]  <reason>`. ty is beta: a ty bump that adds diagnostics lands with its fixes.
@@ -71,7 +71,7 @@ src/
 tests/
   conftest.py        fakes for every seam (JobStore over Procrastinate's InMemoryConnector, weather, clock); app fixture built through api.py; run_workers drains the queue
   test_<feature>.py  one file per user-facing feature
-deploy/              weather-stub/, helm/optifuel/, kind-smoke.sh
+deploy/              weather-stub/, helm/optifuel/, kind-smoke.sh, kind-dev.sh
 scripts/             seed.py
 docker-compose.yaml  local stack
 ```
