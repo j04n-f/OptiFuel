@@ -71,8 +71,9 @@ src/optifuel/
 tests/
   conftest.py        fakes for every repository and client; app fixture built through api.py
   test_<feature>.py  one file per user-facing feature
-deploy/              compose.yaml, weather-stub/, helm/optifuel/, kind-smoke.sh
+deploy/              weather-stub/, helm/optifuel/, kind-smoke.sh
 scripts/             seed.py
+docker-compose.yaml  local stack
 ```
 
 - **Layers**: calls flow controller → service → repository or client, one direction. Controllers hold HTTP only, services hold every business rule and import no FastAPI, repositories hold SQL and file access only.
