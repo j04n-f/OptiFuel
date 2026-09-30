@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OptiFuel</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    textarea { width: 100%; font-family: ui-monospace, monospace; }
+    button { margin-top: 1rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h1>OptiFuel</h1>
+
+  <form id="submit-form">
+    <label for="airline">Airline</label>
+    <select id="airline" required></select>
+
+    <label for="plan">Job (JSON)</label>
+    <textarea id="plan" rows="18" spellcheck="false" required>{
+  "type": "fuel_estimate",
+  "payload": {
+    "airline": "ABC",
+    "aircraft_type": "B777",
+    "registration": "EC-ABC",
+    "flight_id": 1,
+    "waypoints": [
+      {"latitude": 41.3, "longitude": 2.1, "speed": 200, "altitude": 5000},
+      {"latitude": 41.8, "longitude": 3.0, "speed": 180, "altitude": 4000}
+    ]
+  }
+}</textarea>
+
+    <button type="submit">Submit</button>
+  </form>
+
+  <p id="message" role="status" aria-live="polite"></p>
+
+  <table>
+    <caption>Jobs for the selected airline, newest first, refreshed every 2 s</caption>
+    <thead>
+      <tr><th scope="col">ID</th><th scope="col">Flight</th><th scope="col">Status</th>
+          <th scope="col">Attempts</th><th scope="col">Fuel or error</th></tr>
+    </thead>
+    <tbody id="jobs"></tbody>
+  </table>
+
+  <script>
+    const airline = document.getElementById("airline");
+    const plan = document.getElementById("plan");
+    const message = document.getElementById("message");
+    const jobs = document.getElementById("jobs");
+
+    // Auth is mocked (ARCHITECTURE.md D9): the selected airline is the caller's identity.
+    const api = (path, init = {}) =>
+      fetch(path, { ...init, headers: { ...init.headers, "X-Airline": airline.value } });
+
+    const detail = async (response) => {
+      const body = await response.json().catch(() => null);
+      const d = body?.detail;
+      if (Array.isArray(d)) return d.map((e) => `${e.loc.join(".")}: ${e.msg}`).join("; ");
+      return d ?? `HTTP ${response.status}`;
+    };
+
+    async function refresh() {
+      const code = airline.value;
+      if (!code) return;
+      const response = await api("/v1/jobs").catch(() => null);
+      if (!response?.ok) return;
+      const list = await response.json();
+      // A poll started before an airline switch must not paint the old airline's jobs.
+      if (code !== airline.value) return;
+      const rows = list.map((job) => {
+        const tr = document.createElement("tr");
+        const outcome = job.result ? `${job.result.total_fuel_lb.toFixed(1)} lb` : job.error ?? "";
+        // textContent, never innerHTML: error text echoes submitted values.
+        for (const cell of [job.id, job.flight_id, job.status, job.attempts, outcome]) {
+          tr.appendChild(document.createElement("td")).textContent = cell;
+        }
+        return tr;
+      });
+      jobs.replaceChildren(...rows);
+    }
+
+    // Keep the plan's airline in step with the selector, so it is not rejected with 403.
+    function selectAirline() {
+      try {
+        const body = JSON.parse(plan.value);
+        body.payload.airline = airline.value;
+        plan.value = JSON.stringify(body, null, 2);
+      } catch {
+        // Invalid JSON stays as typed; submit reports it.
+      }
+      jobs.replaceChildren();
+      refresh();
+    }
+    airline.addEventListener("change", selectAirline);
+
+    document.getElementById("submit-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      let body;
+      try {
+        body = JSON.parse(plan.value);
+      } catch (error) {
+        message.textContent = `Invalid JSON: ${error.message}`;
+        return;
+      }
+      const response = await api("/v1/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).catch(() => null);
+      if (!response) {
+        message.textContent = "Submit failed: API unreachable";
+      } else if (response.ok) {
+        message.textContent = `Job ${(await response.json()).id} submitted`;
+        refresh();
+      } else {
+        message.textContent = `Rejected (${response.status}): ${await detail(response)}`;
+      }
+    });
+
+    (async () => {
+      const response = await fetch("/v1/tenants").catch(() => null);
+      if (!response?.ok) {
+        message.textContent = "Could not load airlines: API unreachable or failing";
+        return;
+      }
+      for (const code of await response.json()) airline.add(new Option(code, code));
+      selectAirline();
+      setInterval(refresh, 2000);
+    })();
+  </script>
+</body>
+</html>

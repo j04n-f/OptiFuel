@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 import procrastinate
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from psycopg_pool import ConnectionPool
 
 from optifuel.clients.clock import SystemClock
@@ -41,6 +42,8 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(health.router)
     app.include_router(jobs.router)
     app.include_router(tenants.router)
+    # Mounted last: routes match in order, so the catch-all "/" never shadows the API.
+    app.mount("/", StaticFiles(packages=[("optifuel", "static")], html=True))
     return app
 
 

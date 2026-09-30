@@ -25,7 +25,7 @@ uv run pre-commit install      # git hooks
 | Format | `uv run ruff format` |
 | Type check | `uv run ty check` |
 | Exercise 1 notebook | `uv run jupyter lab exercise_1/analysis.ipynb` (Run All + save after changing the modules) |
-| Local stack (postgres, migrate, api, worker-abc, worker-xyz, weather stub) | `docker compose -f deploy/compose.yaml up --build`; API on `localhost:8000` |
+| Local stack (postgres, migrate, api, worker-abc, worker-xyz, weather stub) | `docker compose -f deploy/compose.yaml up --build`; page and API on `localhost:8000` |
 | Submit a plan to the stack as ABC | `curl -H 'X-Airline: ABC' -H 'Content-Type: application/json' -d '{"type": "fuel_estimate", "payload": {"airline": "ABC", "aircraft_type": "B777", "registration": "EC-ABC", "flight_id": 1, "waypoints": [{"latitude": 41.3, "longitude": 2.1, "speed": 200, "altitude": 5000}, {"latitude": 41.8, "longitude": 3.0, "speed": 180, "altitude": 4000}]}}' localhost:8000/v1/jobs`, then `curl -H 'X-Airline: ABC' localhost:8000/v1/jobs/<id>` |
 | API (dev, reload) | `OPTIFUEL_DATABASE_URL=postgresql://... uv run uvicorn --factory optifuel.api:from_env --reload` |
 | Worker (one per airline) | `uv run python -m optifuel.worker` with `OPTIFUEL_WORKER_AIRLINE`, `OPTIFUEL_TENANTS`, `OPTIFUEL_MODEL_DIR` (holding `<airline>/<version>.json`), `OPTIFUEL_WEATHER_URL`, `OPTIFUEL_WEATHER_TOKEN`, `OPTIFUEL_DATABASE_URL` |
