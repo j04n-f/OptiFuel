@@ -75,12 +75,12 @@ services:
     volumes: ["./models/XYZ:/models/XYZ:ro"]
     depends_on: *worker-deps
 
-  # Stands in for the Kubernetes CronJob: every 5 minutes; a failed run restarts the loop.
+  # Stands in for the Kubernetes CronJob: every 5 minutes; a failed run is retried on the next tick.
   # Run once now: `docker compose run --rm cleanup python -m src.cleanup`.
   cleanup:
     <<: *app
     restart: unless-stopped
-    command: ["sh", "-c", "while python -m src.cleanup; do sleep 300; done"]
+    command: ["sh", "-c", "while :; do python -m src.cleanup; sleep 300; done"]
 
   # Stands in for the external weather API: 10 kt from the west at every point.
   weather:
