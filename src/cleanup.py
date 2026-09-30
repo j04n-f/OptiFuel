@@ -4,7 +4,7 @@ import logging
 import procrastinate
 
 from src.config import Settings
-from src.repositories.postgres import queue_app
+from src.services.jobs import queue_app
 
 logger = logging.getLogger(__name__)
 

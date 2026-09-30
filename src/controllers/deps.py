@@ -2,9 +2,7 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from src.clients.clock import Clock
-from src.repositories.protocols import JobRepository
-from src.services.jobs import JobService
+from src.services.jobs import JobQueue
 from src.services.tenants import Tenants, UnknownAirlineError
 
 
@@ -13,23 +11,11 @@ def get_tenants(request: Request) -> Tenants:
     return request.app.state.tenants
 
 
-def get_clock(request: Request) -> Clock:
-    return request.app.state.clock
-
-
-def get_job_repository(request: Request) -> JobRepository:
+def get_job_queue(request: Request) -> JobQueue:
     return request.app.state.jobs
 
 
-def get_job_service(
-    jobs: Annotated[JobRepository, Depends(get_job_repository)],
-    clock: Annotated[Clock, Depends(get_clock)],
-    tenants: Annotated[Tenants, Depends(get_tenants)],
-) -> JobService:
-    return JobService(jobs, clock, tenants)
-
-
-JobServiceDep = Annotated[JobService, Depends(get_job_service)]
+JobQueueDep = Annotated[JobQueue, Depends(get_job_queue)]
 
 
 def current_airline(

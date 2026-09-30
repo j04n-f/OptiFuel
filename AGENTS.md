@@ -60,16 +60,16 @@ src/
   config.py          Settings, the one environment-variable reader
   schemas.py         pydantic models: FlightPlan, JobView, model file
   controllers/       FastAPI routers: parse request, call one service, map result or error to HTTP
-  services/          business rules: tenants.py (registry), jobs.py (lifecycle), fuel.py (pipeline)
-  repositories/      persistence: protocols.py (Protocols), postgres.py, files.py (models)
+  services/          business rules: tenants.py (registry), jobs.py (job queue: App, task, retry, status, identity), fuel.py (pipeline)
+  repositories/      persistence: protocols.py (JobStore Protocol + JobRow), postgres.py, files.py (models)
   clients/           external I/O: weather.py, clock.py (Protocol + real implementation each)
-  worker.py          worker process: Procrastinate task → fuel service
+  worker.py          worker process: build (tenant, weather, model checks) → run the queue's task
   migrate.py         one-shot: apply schema
   cleanup.py         one-shot: retry stalled jobs, purge old ones
   sql/schema.sql
   static/            index.html, style.css, app.js
 tests/
-  conftest.py        fakes for every repository and client; app fixture built through api.py
+  conftest.py        fakes for every seam (JobStore over Procrastinate's InMemoryConnector, weather, clock); app fixture built through api.py; run_workers drains the queue
   test_<feature>.py  one file per user-facing feature
 deploy/              weather-stub/, helm/optifuel/, kind-smoke.sh
 scripts/             seed.py
@@ -91,7 +91,7 @@ docker-compose.yaml  local stack
 - **End-to-end first**: drive the app over HTTP through `TestClient`, wired by `api.py`, with fakes only at the outer edge (repositories, clients). A job test submits with `POST /v1/jobs`, the fake queue runs the worker task inline, and `GET /v1/jobs/{id}` reads the outcome. A unit test is for pure logic whose edge cases HTTP cannot reach cheaply (fuel integration math).
 - **Black box**: assert what a user observes: status code, response body, what the weather API was asked. A test survives any refactor that keeps behaviour; one that breaks on a rename or a moved function is testing implementation, and gets rewritten.
 - Red first: the test fails, then the code turns it green. A bug fix lands with the test that failed first.
-- Tests run offline. Fakes are small hand-written classes that satisfy the seam's `Protocol`, typed so ty flags them when the seam changes; they live as fixtures in `tests/conftest.py` and enter through `app.dependency_overrides`.
+- Tests run offline. Fakes are small hand-written classes that satisfy the seam's `Protocol`, typed so ty flags them when the seam changes; they live as fixtures in `tests/conftest.py` and enter through `app.dependency_overrides`. The queue itself is not faked: tests run the real task on Procrastinate's `InMemoryConnector`, and `run_workers()` is the explicit "a worker claimed it" step after `POST`.
 - Mocks need a reason: `unittest.mock`, `pytest-mock`, and `monkeypatch` of internals are a last resort for code no seam reaches, and every mock is one more copy of an interface to maintain. Refactor to a seam first; if a mock still lands, a comment names why the seam was impossible.
 - Name tests by behaviour (`test_rejects_unknown_airline`). Variants of one behaviour are one `@pytest.mark.parametrize` list.
 - Body is arrange / act / assert, blocks split by one blank line, no section comments.

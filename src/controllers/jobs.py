@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from src.controllers.deps import AirlineDep, JobServiceDep
+from src.controllers.deps import AirlineDep, JobQueueDep
 from src.schemas import JobSubmission, JobView
 from src.services.jobs import AirlineMismatchError
 from src.services.tenants import AircraftNotEnabledError
@@ -12,10 +12,10 @@ router = APIRouter(prefix="/v1/jobs")
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 def submit_job(
-    submission: JobSubmission, airline: AirlineDep, service: JobServiceDep
+    submission: JobSubmission, airline: AirlineDep, queue: JobQueueDep
 ) -> dict[str, int]:
     try:
-        return {"id": service.submit(airline, submission)}
+        return {"id": queue.submit(airline, submission)}
     except AirlineMismatchError as error:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
     except AircraftNotEnabledError as error:
@@ -24,14 +24,14 @@ def submit_job(
 
 @router.get("")
 def list_jobs(
-    airline: AirlineDep, service: JobServiceDep, limit: Annotated[int, Query(ge=1, le=100)] = 50
+    airline: AirlineDep, queue: JobQueueDep, limit: Annotated[int, Query(ge=1, le=100)] = 50
 ) -> list[JobView]:
-    return service.recent(airline, limit)
+    return queue.recent(airline, limit)
 
 
 @router.get("/{job_id}")
-def get_job(job_id: int, airline: AirlineDep, service: JobServiceDep) -> JobView:
-    job = service.get(airline, job_id)
+def get_job(job_id: int, airline: AirlineDep, queue: JobQueueDep) -> JobView:
+    job = queue.get(airline, job_id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "job not found")
     return job

@@ -9,7 +9,8 @@ from psycopg_pool import ConnectionPool
 from src.clients.clock import SystemClock
 from src.config import Settings
 from src.controllers import health, jobs, tenants
-from src.repositories.postgres import PostgresJobRepository, queue_app
+from src.repositories.postgres import PostgresJobStore
+from src.services.jobs import JobQueue, queue_app
 from src.services.tenants import Tenants
 
 
@@ -25,6 +26,7 @@ def create_app(settings: Settings) -> FastAPI:
         check=ConnectionPool.check_connection,
     )
     queue = queue_app(procrastinate.SyncPsycopgConnector())
+    registry = Tenants(settings.tenants)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -37,9 +39,8 @@ def create_app(settings: Settings) -> FastAPI:
             pool.close()
 
     app = FastAPI(title="OptiFuel", lifespan=lifespan)
-    app.state.tenants = Tenants(settings.tenants)
-    app.state.clock = SystemClock()
-    app.state.jobs = PostgresJobRepository(pool, queue)
+    app.state.tenants = registry
+    app.state.jobs = JobQueue(PostgresJobStore(pool, queue), SystemClock(), registry)
     app.include_router(health.router)
     app.include_router(jobs.router)
     app.include_router(tenants.router)

@@ -1,21 +1,23 @@
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import ExitStack
 from datetime import UTC, datetime
+from typing import Any
 
+import procrastinate
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from procrastinate.jobs import Job
+from procrastinate.testing import InMemoryConnector
 from pydantic import SecretStr
 
 from src.api import create_app
-from src.clients.clock import Clock
 from src.clients.weather import Wind, WindQuery
 from src.config import Settings, Tenant
-from src.controllers.deps import get_clock, get_job_repository
-from src.repositories.protocols import JobRepository
-from src.schemas import FuelModel, FuelResult, JobSubmission, JobView
+from src.controllers.deps import get_job_queue
+from src.repositories.protocols import JobRow
+from src.schemas import FuelModel, FuelResult, JobSubmission
 from src.services.fuel import FuelService
-from src.worker import RETRY
+from src.services.jobs import JobQueue, queue_app, queue_name, register_fuel_estimate
 
 ABC_MODEL = FuelModel.model_validate(
     {
@@ -27,6 +29,11 @@ ABC_MODEL = FuelModel.model_validate(
     }
 )
 XYZ_MODEL = ABC_MODEL.model_copy(update={"airline": "XYZ"})
+MODELS = {"ABC": ABC_MODEL, "XYZ": XYZ_MODEL}
+TENANTS = {
+    "ABC": Tenant(aircraft_types=frozenset({"B777"}), model_version="2026-09-30"),
+    "XYZ": Tenant(aircraft_types=frozenset({"A320"}), model_version="2026-09-30"),
+}
 DEPARTURE = datetime(2026, 9, 30, 10, 0, tzinfo=UTC)
 
 
@@ -77,72 +84,73 @@ class FakeWeather:
         return [self.wind] * len(points)
 
 
-class FakeJobs:
-    """Job and result store in one dict; `submit` runs the airline's worker inline, like a queue
-    whose worker claims the job at once and reruns it, minus the backoff wait, while the task's
-    `RETRY` allows."""
+class InMemoryJobStore:
+    """Job records in a dict; queue state comes from the in-memory connector's jobs, as the
+    Postgres store's comes from `procrastinate_jobs`."""
 
-    def __init__(self) -> None:
-        self.jobs: dict[int, JobView] = {}
-        self.workers: dict[str, FuelService] = {}
-        self.plan_keys: dict[int, str] = {}
+    def __init__(self, queue: procrastinate.App, connector: InMemoryConnector) -> None:
+        self._queue = queue
+        self._connector = connector
+        self.records: dict[int, dict[str, Any]] = {}
         self.database_up = True
 
     def ping(self) -> bool:
         return self.database_up
 
-    def submit(self, submission: JobSubmission, plan_key: str, submitted_at: datetime) -> int:
+    def submit(
+        self,
+        submission: JobSubmission,
+        plan_key: str,
+        submitted_at: datetime,
+        *,
+        queue: str,
+        queueing_lock: str,
+    ) -> int:
         plan = submission.payload
-        job = JobView(
-            id=len(self.jobs) + 1,
-            type=submission.type,
-            airline=plan.airline,
-            flight_id=plan.flight_id,
-            status="running",
-            attempts=0,
-            submitted_at=submitted_at,
+        job_id = self._queue.configure_task(
+            submission.type, queue=queue, queueing_lock=queueing_lock
+        ).defer(flight_plan=plan.model_dump(mode="json"))
+        self.records[job_id] = {
+            "id": job_id,
+            "type": submission.type,
+            "airline": plan.airline,
+            "flight_id": plan.flight_id,
+            "plan_key": plan_key,
+            "submitted_at": submitted_at,
+        }
+        return job_id
+
+    def get(self, airline: str, job_id: int) -> JobRow | None:
+        record = self.records.get(job_id)
+        return self._row(record) if record and record["airline"] == airline else None
+
+    def recent(self, airline: str, limit: int) -> list[JobRow]:
+        return self._rows(airline)[:limit]
+
+    def queued(self, airline: str, plan_key: str) -> JobRow | None:
+        return next(
+            (
+                row
+                for row in self._rows(airline)
+                if self.records[row.id]["plan_key"] == plan_key and row.queue_status == "todo"
+            ),
+            None,
         )
-        self.jobs[job.id] = job
-        self.plan_keys[job.id] = plan_key
-        while job.status == "running":
-            job.attempts += 1
-            try:
-                self.workers[plan.airline].estimate(job.id, plan)
-            except Exception as error:  # Procrastinate fails the attempt on any exception
-                # The strategy's `attempts` counts finished tries, like procrastinate_jobs.
-                claimed = Job(
-                    id=job.id,
-                    queue="",
-                    lock=None,
-                    queueing_lock=None,
-                    task_name=job.type,
-                    attempts=job.attempts - 1,
-                )
-                if RETRY.get_retry_decision(exception=error, job=claimed) is None:
-                    job.status = "failed"
-            else:
-                job.status = "succeeded"
-        return job.id
-
-    def latest(self, airline: str, plan_key: str) -> JobView | None:
-        newest_first = self.recent(airline, limit=len(self.jobs))
-        return next((job for job in newest_first if self.plan_keys[job.id] == plan_key), None)
-
-    def get(self, airline: str, job_id: int) -> JobView | None:
-        job = self.jobs.get(job_id)
-        return job if job is not None and job.airline == airline else None
-
-    def recent(self, airline: str, limit: int) -> list[JobView]:
-        own = [job for job in self.jobs.values() if job.airline == airline]
-        return sorted(own, key=lambda job: (job.submitted_at, job.id), reverse=True)[:limit]
 
     def record_success(self, job_id: int, result: FuelResult, finished_at: datetime) -> None:
-        job = self.jobs[job_id]
-        job.result, job.error, job.finished_at = result, None, finished_at
+        self.records[job_id] |= {"result": result, "error": None, "finished_at": finished_at}
 
     def record_error(self, job_id: int, error: str, finished_at: datetime) -> None:
-        job = self.jobs[job_id]
-        job.error, job.finished_at = error, finished_at
+        self.records[job_id] |= {"error": error, "finished_at": finished_at}
+
+    def _rows(self, airline: str) -> list[JobRow]:
+        own = [self._row(r) for r in self.records.values() if r["airline"] == airline]
+        return sorted(own, key=lambda row: (row.submitted_at, row.id), reverse=True)
+
+    def _row(self, record: dict[str, Any]) -> JobRow:
+        job = self._connector.jobs[record["id"]]
+        fields = {k: v for k, v in record.items() if k != "plan_key"}
+        return JobRow(**fields, queue_status=job["status"], attempts=job["attempts"])
 
 
 @pytest.fixture
@@ -156,31 +164,56 @@ def weather() -> FakeWeather:
 
 
 @pytest.fixture
-def jobs(clock: FakeClock, weather: FakeWeather) -> FakeJobs:
-    jobs = FakeJobs()
-    jobs.workers["ABC"] = FuelService(ABC_MODEL, weather, jobs, clock)
-    jobs.workers["XYZ"] = FuelService(XYZ_MODEL, weather, jobs, clock)
-    return jobs
+def connector() -> InMemoryConnector:
+    return InMemoryConnector()
 
 
 @pytest.fixture
-def app(clock: FakeClock, jobs: FakeJobs) -> FastAPI:
-    # Typed providers, not lambdas: dependency_overrides values are unchecked, these are not.
-    def fake_clock() -> Clock:
-        return clock
+def store(connector: InMemoryConnector) -> Iterator[InMemoryJobStore]:
+    # The API side's app: defers by task name, registers no task, like `api.py`'s.
+    queue = queue_app(connector)
+    with queue.open():
+        yield InMemoryJobStore(queue, connector)
 
-    def fake_jobs() -> JobRepository:
-        return jobs
 
-    tenants = {
-        "ABC": Tenant(aircraft_types=frozenset({"B777"}), model_version="2026-09-30"),
-        "XYZ": Tenant(aircraft_types=frozenset({"A320"}), model_version="2026-09-30"),
-    }
-    # Builds the real pool, which never connects: min_size=0 and the repository is overridden.
-    database_url = SecretStr("postgresql://unused")
-    app = create_app(Settings(environment="dev", database_url=database_url, tenants=tenants))
-    app.dependency_overrides[get_clock] = fake_clock
-    app.dependency_overrides[get_job_repository] = fake_jobs
+@pytest.fixture
+def run_workers(
+    connector: InMemoryConnector, store: InMemoryJobStore, weather: FakeWeather, clock: FakeClock
+) -> Iterator[Callable[[], None]]:
+    """One worker per airline on the shared connector, each with its own model, like the
+    per-airline Deployments. Calling it runs them until nothing is queued, skipping retry
+    backoff by clearing `scheduled_at`: the queue's clock jumps, the retry strategy does not."""
+    with ExitStack() as stack:
+        workers = {}
+        for airline, model in MODELS.items():
+            app = stack.enter_context(queue_app(connector).open())
+            register_fuel_estimate(app, FuelService(model, weather, store, clock))
+            workers[airline] = app
+
+        def run() -> None:
+            while any(job["status"] == "todo" for job in connector.jobs.values()):
+                for job in connector.jobs.values():
+                    job["scheduled_at"] = None
+                for airline, app in workers.items():
+                    app.run_worker(queues=[queue_name(airline)], wait=False)
+
+        yield run
+
+
+@pytest.fixture
+def app(clock: FakeClock, store: InMemoryJobStore) -> FastAPI:
+    # Builds the real pool and queue, which never connect: min_size=0 and the job queue is
+    # overridden with one over the in-memory store.
+    settings = Settings(
+        environment="dev", database_url=SecretStr("postgresql://x"), tenants=TENANTS
+    )
+    app = create_app(settings)
+
+    # Typed provider, not a lambda: dependency_overrides values are unchecked, this is not.
+    def in_memory_queue() -> JobQueue:
+        return JobQueue(store, clock, app.state.tenants)
+
+    app.dependency_overrides[get_job_queue] = in_memory_queue
     return app
 
 
