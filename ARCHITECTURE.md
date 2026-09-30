@@ -346,10 +346,15 @@ worker count pushes connection limits.
 
 `src/optifuel/static/index.html`, served at `/`. One file, inline JS, no framework, no build:
 
-- Airline selector (from `GET /v1/tenants`), sent as `X-Airline`.
-- JSON textarea pre-filled with an in-envelope sample plan, and a Submit button.
-- Jobs table (`GET /v1/jobs`), refreshed every 2 s: id, flight, status, attempts, fuel or error.
-- Controls have labels and the table has headers; status is text, not colour only.
+- Airline selector (from `GET /v1/tenants`), sent as `X-Airline`; the page's accent colour follows
+  the airline.
+- JSON textarea pre-filled with an in-envelope sample plan, and a Submit button. A route chart,
+  altitude profile and plan summary redraw from the textarea as it is edited (display only; the
+  server still validates).
+- Jobs table (`GET /v1/jobs`), refreshed every 2 s: id, flight, status, attempts, fuel or error,
+  with status counts and total fuel. A job opens a dialog with its full job view.
+- Controls have labels and the table has headers; status is text, not colour only. Animations
+  stop under `prefers-reduced-motion`.
 
 ## 10. Not now, and the trigger
 
