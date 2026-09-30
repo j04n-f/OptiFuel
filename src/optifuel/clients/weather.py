@@ -36,11 +36,14 @@ class _WindsReply(BaseModel):
 
 class HttpWeatherClient:
     """`POST {url}/winds` with a bearer token. Raises on timeout, connection error or non-2xx,
-    so the job records why it failed."""
+    so the job records why it failed. `transport` is the network edge: tests hand in a fake."""
 
-    def __init__(self, url: str, token: str) -> None:
+    def __init__(self, url: str, token: str, transport: httpx2.BaseTransport) -> None:
         self._http = httpx2.Client(
-            base_url=url, headers={"Authorization": f"Bearer {token}"}, timeout=5
+            base_url=url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+            transport=transport,
         )
 
     def winds(self, points: Sequence[WindQuery]) -> list[Wind]:

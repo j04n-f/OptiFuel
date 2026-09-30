@@ -2,6 +2,7 @@ import logging
 import sys
 from typing import Any
 
+import httpx2
 import procrastinate
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
@@ -37,7 +38,7 @@ def main() -> None:
         url, min_size=1, max_size=1, open=False, check=ConnectionPool.check_connection
     )
     weather = HttpWeatherClient(
-        str(settings.weather_url), settings.weather_token.get_secret_value()
+        str(settings.weather_url), settings.weather_token.get_secret_value(), httpx2.HTTPTransport()
     )
     service = FuelService(model, weather, PostgresResultRepository(pool), SystemClock())
     queue = queue_app(procrastinate.PsycopgConnector(conninfo=url))
