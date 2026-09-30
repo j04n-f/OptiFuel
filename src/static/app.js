@@ -327,6 +327,7 @@ function fillDialog(job) {
   $("d-id").textContent = `#${job.id}`;
   $("d-flight").textContent = `${job.airline} ${job.flight_id}`;
   setStatus($("d-status"), job.status);
+  $("d-type").textContent = job.type;
   $("d-attempts").textContent = job.attempts;
   $("d-model").textContent = result?.model_version ?? "—";
   $("d-distance").textContent = result ? `${num(result.distance_km, 1)} km` : "—";
@@ -339,12 +340,29 @@ function fillDialog(job) {
   error.textContent = job.error ?? "";
 }
 
-function openDialog(id) {
+async function openDialog(id) {
   const row = rows.get(id);
   if (!row) return;
   openJob = id;
   fillDialog(row.job);
   if (!dialog.open) dialog.showModal();
+  let response;
+  try {
+    response = await api(`/v1/jobs/${id}`);
+  } catch {
+    if (openJob === id) {
+      $("d-error").hidden = false;
+      $("d-error").textContent = "Request failed";
+    }
+    return;
+  }
+  if (openJob !== id) return;
+  if (!response.ok) {
+    $("d-error").hidden = false;
+    $("d-error").textContent = `HTTP ${response.status}`;
+    return;
+  }
+  fillDialog(await response.json());
 }
 dialog.addEventListener("close", () => { openJob = null; });
 dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });

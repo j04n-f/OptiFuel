@@ -363,7 +363,8 @@ no build:
   server still validates).
 - Jobs table (`GET /v1/jobs?limit=100`, the list cap), refreshed every 2 s: id, flight, status,
   attempts, fuel or error, with status counts and total fuel for those last 100 jobs, not
-  all-time. A job opens a dialog with its full job view.
+  all-time. Opening a job shows its cached row at once, fetches `GET /v1/jobs/{id}`, and keeps
+  refreshing with the poll.
 - Controls have labels and the table has headers; status is text, not colour only. Animations
   stop under `prefers-reduced-motion`.
 
