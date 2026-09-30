@@ -74,10 +74,10 @@ function say(text, kind = "") {
   message.textContent = text;
   message.className = `message ${kind}`;
 }
-function setLink(live) {
+function setLink(live, reason = "") {
   const link = $("link");
   link.classList.toggle("lost", !live);
-  link.textContent = live ? `Live · ${hms(new Date())}Z` : "Offline · retrying";
+  link.textContent = live ? `Live · ${hms(new Date())}Z` : `${reason || "Offline"} · retrying`;
 }
 function setStatus(node, status) {
   node.dataset.status = status;
@@ -305,8 +305,9 @@ async function refresh() {
     const response = await api("/v1/jobs");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     list = await response.json();
-  } catch {
-    if (code === current) setLink(false);
+  } catch (error) {
+    // Only a non-OK response carries an HTTP status; a thrown fetch is a network failure.
+    if (code === current) setLink(false, error.message.startsWith("HTTP ") ? error.message : "");
     return;
   }
   // A poll started before an airline switch must not paint the old airline's jobs.
