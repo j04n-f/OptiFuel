@@ -401,9 +401,11 @@ offline with fakes (tests red first).
    weather asked for every waypoint) and `test_fails_out_of_envelope_plan`.
 6. **Static page.** `index.html` served at `/`.
 7. **Compose.** `deploy/compose.yaml`: postgres (official image, tag+digest), migrate (one-shot),
-   api, worker-abc, worker-xyz (each mounts only its model), WireMock weather stub.
+   api, worker-abc, worker-xyz (each mounts only its model), WireMock weather stub, and seed
+   (one-shot, `scripts/seed.py`, mounted since dev tooling stays out of the image): a fake `DEMO`
+   tenant with no model or worker, holding one job in each status so the page shows them all.
    *Check:* `docker compose -f deploy/compose.yaml up`, submit via the page as ABC, see
-   `succeeded`; ABC's job is 404 for XYZ.
+   `succeeded`; ABC's job is 404 for XYZ; DEMO lists queued, running, succeeded and failed.
 8. **Helm.** `deploy/helm/optifuel`: API Deployment/Service/HPA, per-tenant worker Deployment +
    ConfigMap + ScaledObject (`keda.enabled`), migrate hook Job, cleanup CronJob, Secret refs.
    `values-kind.yaml` enables a Postgres StatefulSet (official image) and the WireMock stub.

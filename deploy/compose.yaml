@@ -7,9 +7,11 @@ x-app: &app
   image: optifuel:dev
   environment: &env
     OPTIFUEL_DATABASE_URL: postgresql://optifuel:${POSTGRES_PASSWORD:-optifuel}@postgres:5432/optifuel
+    # DEMO is fake: no model, no worker; `seed` fills it with a job in every status.
     OPTIFUEL_TENANTS: >-
       {"ABC": {"aircraft_types": ["B777"], "model_version": "2026-09-30"},
-       "XYZ": {"aircraft_types": ["A320"], "model_version": "2026-09-30"}}
+       "XYZ": {"aircraft_types": ["A320"], "model_version": "2026-09-30"},
+       "DEMO": {"aircraft_types": ["A350"], "model_version": "2026-09-30"}}
   depends_on: &migrated
     migrate:
       condition: service_completed_successfully
@@ -37,6 +39,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # scripts/ is dev tooling, not in the image: mounted, run against the image's optifuel.
+  seed:
+    <<: *app
+    command: ["python", "/scripts/seed.py"]
+    volumes: ["../scripts:/scripts:ro"]
 
   api:
     <<: *app

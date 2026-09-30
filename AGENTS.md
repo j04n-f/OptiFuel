@@ -52,6 +52,7 @@ Caveman. Technical substance stays, fluff dies.
 
 - `exercise_1/`: `analysis.ipynb` holds the narrative and calls `cleanup.py`, `compute.py`, `plot.py`, where the logic lives. After every change, Run All and save so committed outputs match the code. Dead ends stay in, each under a markdown cell saying what was tried and why it was dropped: the assignment grades the decision trail. Here addition beats deletion.
 - `src/optifuel/`: the job processor service (exercise 2), laid out as below. Design, decisions, and build plan: `ARCHITECTURE.md`; read it before changing the service's shape.
+- `scripts/`: dev tooling run against the service (`seed.py`: fake airline DEMO with a job in every status). `src/optifuel/` holds only code the image ships; anything else lives here.
 
 ```
 src/optifuel/
@@ -71,6 +72,7 @@ tests/
   conftest.py        fakes for every repository and client; app fixture built through api.py
   test_<feature>.py  one file per user-facing feature
 deploy/              compose.yaml, weather-stub/, helm/optifuel/, kind-smoke.sh
+scripts/             seed.py
 ```
 
 - **Layers**: calls flow controller → service → repository or client, one direction. Controllers hold HTTP only, services hold every business rule and import no FastAPI, repositories hold SQL and file access only.
