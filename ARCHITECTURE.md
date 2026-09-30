@@ -63,7 +63,7 @@ flowchart LR
 | D1 | Control plane / data plane split. One generic job contract (`id, type, airline, status, attempts, timestamps, result, error`) and a job-type registry holding one type, `fuel_estimate`. | Generic multi-team job platform; OptiFuel-only code with no contract. | New job types and pipeline steps plug in without reshaping the API. A platform nobody asked for is YAGNI. |
 | D2 | Long-running worker Deployments pulling from a queue. | Kubernetes `Job` per event; operator with an `InferenceJob` CRD; KEDA `ScaledJob`. | Inference takes milliseconds, pod start takes seconds. etcd is not a job store. Workers keep the model in memory. |
 | D3 | Postgres only: queue, job records, results. | Kafka / Pub/Sub; Redis queue + Postgres. | Around 10⁵ flights/day worldwide, so tens of events/s at peak [inference], far below a Postgres queue's ceiling. Deferring the job and writing its record share one transaction, so no dual-write. One stateful dependency. |
-| D4 | Procrastinate 3.10 as the queue library. | Hand-rolled `SKIP LOCKED`; PgQueuer; DBOS; oban-py; chancy; bullmq (Postgres backend). | Most mature Postgres queue for Python. Has per-queue workers, retries limited to listed exceptions, heartbeat stall detection, `remove_old_jobs`, and an in-memory connector. PgQueuer moves finished jobs to a log table. DBOS needs its paid Conductor to recover a dead pod's work. oban-py is beta. bullmq's Postgres backend is 2 months old. |
+| D4 | Procrastinate 3.10 as the queue library. | Hand-rolled `SKIP LOCKED`; PgQueuer; DBOS; oban-py; chancy; bullmq (Postgres backend). | Most mature Postgres queue for Python. Has per-queue workers, retries limited to listed exceptions, heartbeat stall detection, `delete_old_jobs`, and an in-memory connector. PgQueuer moves finished jobs to a log table. DBOS needs its paid Conductor to recover a dead pod's work. oban-py is beta. bullmq's Postgres backend is 2 months old. |
 | D5 | HTTP ingress: `POST /v1/jobs` returns `202 {id}`. Clients poll. | Airlines publish to a broker; webhooks; SSE. | Simplest contract an airline can call. Polling needs no extra infrastructure. |
 | D6 | Tenant isolation: per-airline queue, worker Deployment and model mount. Shared API and Postgres, filtered by airline. | Shared worker pool loading any model; namespace or database per airline. | A worker can only read its own airline's model, and a busy airline can't starve the others. Namespace-per-airline is the premium tier: the same chart installed once per namespace. |
 | D7 | Models are JSON parameters with a validity envelope, keyed by airline, version pinned in config, read through a `ModelRepository` interface. | joblib/pickle; ONNX. | Loading runs no code. The Q4 model is 3 numbers. The loader dispatches on `form`, so a new model family means a new loader. |
@@ -142,8 +142,8 @@ Procrastinate status maps to the contract: `todo → queued`, `doing → running
   start (§5).
 - **Dead letters**: `failed` jobs with their `error`. Resubmitting the same plan creates a new job.
 - **Duplicates**: `plan_key = sha256(canonical payload)`. The API returns the airline's latest
-  not-failed job with that key. `queueing_lock = "{airline}:{plan_key}"` catches two identical
-  requests racing; `AlreadyEnqueued` resolves to the existing job.
+  job with that key unless it failed. `queueing_lock = "{airline}:{plan_key}"` catches two
+  identical requests racing; `AlreadyEnqueued` resolves to the existing job.
 
 ### Submit → result
 
@@ -197,7 +197,7 @@ CREATE INDEX IF NOT EXISTS job_records_plan ON job_records (airline, plan_key);
   (`fuel_estimate`). Queue: `airline.<CODE>`.
 - The worker writes `error` on every failed attempt, so a job that fails for good keeps its last
   error. Success writes `result` and clears `error`.
-- `remove_old_jobs` deletes old jobs; `ON DELETE CASCADE` removes their records.
+- `delete_old_jobs` deletes old jobs; `ON DELETE CASCADE` removes their records.
 - The API writes `job_records` in the same transaction as the defer:
   `App.configure_task(..., connection=conn).defer(...)` (Procrastinate 3.10) runs the job insert
   on the API's own connection, inside its transaction.
@@ -312,7 +312,7 @@ ConfigMaps.
   (`IF NOT EXISTS`). `ponytail:` no migration tool; Procrastinate upgrades need its versioned
   migration scripts, which is the point to adopt one.
 - **Cleanup** retries jobs from workers whose heartbeat went stale (`get_stalled_jobs` →
-  `retry_job`), then `remove_old_jobs` older than `RETENTION_DAYS`, including failed ones.
+  `retry_job`), then `delete_old_jobs` older than `RETENTION_DAYS`, including failed ones.
 
 ## 8. Scaling and resilience
 

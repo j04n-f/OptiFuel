@@ -35,7 +35,7 @@ uv run pre-commit install      # git hooks
 | Cleanup (requeue jobs of dead workers, purge finished jobs after `OPTIFUEL_RETENTION_DAYS`, default 30) | `uv run python -m src.cleanup` with `OPTIFUEL_DATABASE_URL`; compose runs it every 5 minutes, once now with `docker compose run --rm cleanup python -m src.cleanup` |
 | Docker (API only; `/health` answers, `/ready` needs Postgres) | `docker build -t optifuel . && docker run --rm -p 8000:8000 -e OPTIFUEL_DATABASE_URL=postgresql://unused optifuel` |
 | Kind smoke (cluster + KEDA + chart with in-cluster Postgres and weather stub; plan succeeds, also after its worker pod is killed mid-run; `keda.enabled=false` keeps min replicas) | `deploy/kind-smoke.sh`; needs docker, kind, helm, kubectl, curl, jq, openssl. Deletes the cluster on exit; `KEEP_CLUSTER=1` keeps it and prints its kubeconfig |
-| Helm install (production values) | Create Secret `optifuel` (`database-url`, `weather-token`), then `helm install optifuel deploy/helm/optifuel -f <values> --set-file tenants.<CODE>.model=<model.json>` per tenant; values: `deploy/helm/optifuel/values.yaml` |
+| Helm install (production values) | Create Secret `optifuel` (`database-url`, `weather-token`), then `helm install optifuel deploy/helm/optifuel -f <values> --set weather.url=<weather API> --set-file tenants.<CODE>.model=<model.json>` per tenant; values: `deploy/helm/optifuel/values.yaml` |
 
 ## Tooling
 
@@ -43,7 +43,7 @@ uv run pre-commit install      # git hooks
 - **ruff**: lint + format. Rule set in `pyproject.toml`.
 - **ty**: type checker (Astral), whole project. Any diagnostic fails. Editor: `ty server` LSP (VS Code "ty" extension).
 - **pytest** + **pytest-cov**.
-- **pre-commit**: ruff, ty, zizmor (GitHub Actions security audit; SHA pins required via `.github/zizmor.yml`), `uv.lock` sync check, file hygiene, private-key detection.
+- **pre-commit**: ruff, ty, zizmor (GitHub Actions security audit; actions must be SHA-pinned), `uv.lock` sync check, file hygiene, private-key detection.
 - **GitHub Actions** (`.github/workflows/ci.yml`): pre-commit, tests, Docker build; actions pinned by commit SHA. **Dependabot** bumps uv deps, actions (SHA + version comment), Docker base image weekly, 7-day cooldown.
 
 Architecture, decisions, rejected alternatives, and implementation plan: [`ARCHITECTURE.md`](ARCHITECTURE.md).

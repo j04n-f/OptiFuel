@@ -1,16 +1,12 @@
-from typing import Annotated
+from fastapi import APIRouter, HTTPException, status
 
-from fastapi import APIRouter, Depends, HTTPException, status
-
-from src.config import Settings
-from src.controllers.deps import JobServiceDep, get_settings
+from src.controllers.deps import JobServiceDep
 
 router = APIRouter()
 
 
 @router.get("/health")
-def health(_settings: Annotated[Settings, Depends(get_settings)]) -> dict[str, str]:
-    # Liveness only: settings unused, kept so the route goes through the composed app.
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
