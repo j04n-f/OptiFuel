@@ -1,8 +1,17 @@
 from fastapi import FastAPI
 
-app = FastAPI(title="OptiFuel")
+from optifuel.config import Settings
+from optifuel.controllers import health
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def create_app(settings: Settings) -> FastAPI:
+    """Composition root. Controllers read what it puts on `app.state` via `controllers/deps.py`."""
+    app = FastAPI(title="OptiFuel")
+    app.state.settings = settings
+    app.include_router(health.router)
+    return app
+
+
+# ponytail: env is read at import. Once Settings gains required fields, add a zero-arg
+# factory building `Settings()` and run uvicorn with `--factory`, so tests can import this.
+app = create_app(Settings())

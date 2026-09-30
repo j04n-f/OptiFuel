@@ -371,12 +371,13 @@ Folder structure and layer rules: `AGENTS.md`, "Where it goes".
 Each step ends green on `uv run pre-commit run --all-files` and `uv run pytest`. Tests run
 offline with fakes (tests red first).
 
-1. **Dependencies.** `uv add procrastinate pydantic-settings`, plus the weather HTTP client as a
-   runtime dep (`httpx2`, already in the lock for tests). Confirm the Procrastinate atomic-defer
-   API (§4).
+1. **Dependencies.** `uv add procrastinate` (`pydantic-settings` landed with the skeleton), plus
+   the weather HTTP client as a runtime dep (`httpx2`, already in the lock for tests). Confirm the
+   Procrastinate atomic-defer API (§4).
 2. **Schemas and fuel service.** `FlightPlan`, model schema, envelope check, fuel integration.
    Unit test only the integration math (headwind raises fuel versus calm air).
-3. **Config and seams.** `Settings`, repository and client Protocols, fakes in `conftest.py`.
+3. **Config and seams.** Extend `Settings` and the `conftest.py` app fixture (both from the
+   skeleton); repository and client Protocols, fakes in `conftest.py`.
 4. **Controllers and job service.** Job routes, `current_airline`, rejections, `/ready`,
    `/v1/tenants`, wired in `api.py`.
    *Check (end-to-end):* one parametrized `test_rejects_invalid_submission` (401 / 403 / 422

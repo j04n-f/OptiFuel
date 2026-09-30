@@ -1,10 +1,8 @@
 from fastapi.testclient import TestClient
 
-from optifuel.api import app
 
-
-def test_health() -> None:
-    response = TestClient(app).get("/health")
+def test_reports_process_up(client: TestClient) -> None:
+    response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
