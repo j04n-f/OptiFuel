@@ -19,7 +19,7 @@ Lazy = efficient, not careless. Best code = code never written.
 - Removing behaviour that looks intentional: ask first.
 - 0.x library: break APIs freely. Compat shims only on request.
 - Abstractions and deps land only when requested or when the rung ladder forces them.
-- Intentional shortcut gets a `ponytail:` comment naming its ceiling + upgrade path.
+- Intentional shortcut gets a `ponytail:` code comment naming its ceiling + upgrade path; docs state the same as **Limitation:**.
 - Same complexity either way: pick the edge-case-correct version.
 
 **Relentless about:** input validation, error handling where data is lost, security, accessibility, explicit requests. Non-trivial logic leaves one runnable check, written the way **Tests** below says.
@@ -50,8 +50,9 @@ Caveman. Technical substance stays, fluff dies.
 
 **Where it goes:**
 
-- `exercise_1/`: `analysis.ipynb` holds the narrative and calls `cleanup.py`, `compute.py`, `plot.py`, where the logic lives. After every change, Run All and save so committed outputs match the code. Dead ends stay in, each under a markdown cell saying what was tried and why it was dropped: the assignment grades the decision trail. Here addition beats deletion.
-- `src/`: the job processor service (exercise 2), imported as package `src` (`from src.config import Settings`, `python -m src.worker`), laid out as below. Design, decisions, and build plan: `ARCHITECTURE.md`; read it before changing the service's shape.
+- `exercise_1/`: `analysis.ipynb` holds the narrative and calls `cleanup.py`, `compute.py`, `plot.py`, where the logic lives. After every change, Run All and save so committed outputs match the code: `uv run jupyter nbconvert --to notebook --execute --inplace exercise_1/analysis.ipynb`, then pre-commit (ruff formats notebook cells). Dead ends stay in, each under a markdown cell saying what was tried and why it was dropped: the assignment grades the decision trail. Here addition beats deletion.
+- `models/*/*.json` ship the notebook's Q4 refit on all flights, which prints the exact coefficients. A refit moves all of: both model files, `ABC_MODEL` in `tests/conftest.py`, the expected fuel in `test_estimates_route_fuel`, `ARCHITECTURE.md` §6, and the README example result (rerun on compose).
+- `src/`: the job processor service (exercise 2), imported as package `src` (`from src.config import Settings`, `python -m src.worker`), laid out as below. Design and decisions: `ARCHITECTURE.md`; read it before changing the service's shape.
 - `scripts/`: dev tooling run against the service (`seed.py`: fake airline DEMO with a job in every status; `kind-smoke.sh`, `kind-dev.sh`: the chart on kind). `src/` holds only code the image ships; anything else lives here.
 
 ```
@@ -85,6 +86,8 @@ docker-compose.yaml  local stack
 **Commits:** conventional commits, imperative lowercase subject, 72 columns.
 
 **Comments:** one or two lines carrying the why, the invariant, or the gotcha the code cannot show.
+
+**Docs:** `README.md` holds what to run (API, config, commands); `ARCHITECTURE.md` holds the design and why. Each fact lives in one of them. Short and plain: tables and one-line bullets, example numbers taken from a real run.
 
 **Tests:**
 
