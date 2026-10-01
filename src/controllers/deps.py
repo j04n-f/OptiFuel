@@ -22,7 +22,7 @@ def current_airline(
     tenants: Annotated[Tenants, Depends(get_tenants)],
     x_airline: Annotated[str | None, Header()] = None,
 ) -> str:
-    # ponytail: mocked identity (D9), the header is trusted. Real auth replaces only this
+    # Limitation: mocked identity (D9), the header is trusted. Real auth replaces only this
     # dependency, returning the airline claim of a token verified at the gateway.
     try:
         return tenants.authenticate(x_airline)

@@ -17,7 +17,7 @@ async def cleanup(settings: Settings) -> None:
     async with queue.open_async():
         jobs = queue.job_manager
 
-        # Stalled: running on a worker whose heartbeat is over 30 s old. ponytail: requeued
+        # Stalled: running on a worker whose heartbeat is over 30 s old. Limitation: requeued
         # however often they stall; fail them past the retry cap if a job keeps killing workers.
         for job in await jobs.get_stalled_jobs():
             await jobs.retry_job(job)

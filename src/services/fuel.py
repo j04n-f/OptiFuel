@@ -74,7 +74,7 @@ def outside_envelope(model: FuelModel, waypoints: Sequence[Waypoint]) -> list[in
 
 
 def etas(waypoints: Sequence[Waypoint], departure: datetime) -> list[datetime]:
-    # ponytail: still-air ETAs, so wind lookups are approximate. Iterate once with ground-speed
+    # Limitation: still-air ETAs, so wind lookups are approximate. Iterate once with ground-speed
     # ETAs if forecast error matters.
     times = [departure]
 

@@ -1,6 +1,6 @@
 {{- if .Values.postgres.enabled }}
 {{- $postgres := dict "root" $ "component" "postgres" }}
-{{- /* kind only. Pre-install hooks, so they exist before the migrate hook. ponytail: hooks sit
+{{- /* kind only. Pre-install hooks, so they exist before the migrate hook. Limitation: hooks sit
 outside the release and data lives in the container; production uses managed Postgres. */}}
 apiVersion: v1
 kind: Service

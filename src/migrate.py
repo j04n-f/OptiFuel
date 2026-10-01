@@ -8,7 +8,7 @@ from src.config import Settings
 
 
 def main() -> None:
-    # ponytail: no migration tool. Upgrading Procrastinate needs its versioned migration
+    # Limitation: no migration tool. Upgrading Procrastinate needs its versioned migration
     # scripts, which is the point to adopt one.
     url = Settings().database_url.get_secret_value()
 

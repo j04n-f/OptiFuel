@@ -1,45 +1,42 @@
-# Lazy senior dev
+# Engineering principles
 
-Lazy = efficient, not careless. Best code = code never written.
-
-**Before writing code, stop at the first rung that holds:**
+**Build ladder.** The best code is code never written. Before writing code, stop at the first rung that works:
 
 1. Skip it (YAGNI).
-2. Stdlib.
+2. Standard library.
 3. Platform feature.
-4. Installed dep.
-5. One line.
-6. Minimum code.
+4. Installed dependency.
+5. A one-line change.
+6. The minimum code that solves the problem.
 
 **Rules:**
 
-- Deletion > addition. Boring > clever. Fewest files.
-- Touch only what was asked. Match surrounding style. Delete the orphans you create.
-- Read a file whole before editing it. Grep snippets locate; they do not justify a change.
-- Removing behaviour that looks intentional: ask first.
-- 0.x library: break APIs freely. Compat shims only on request.
-- Abstractions and deps land only when requested or when the rung ladder forces them.
-- Intentional shortcut gets a `ponytail:` code comment naming its ceiling + upgrade path; docs state the same as **Limitation:**.
-- Same complexity either way: pick the edge-case-correct version.
+- Prefer deletion to addition, boring to clever, and fewer files to more.
+- Change only what was asked. Match the surrounding style. Remove anything your change leaves unused.
+- Read a file in full before editing it. Search results locate code; they do not justify a change.
+- Ask before removing behaviour that looks intentional.
+- The project is 0.x: break APIs freely. Add compatibility shims only on request.
+- Add abstractions and dependencies only when requested or when the ladder forces them.
+- When two options cost the same, choose the one that handles edge cases correctly.
 
-**Relentless about:** input validation, error handling where data is lost, security, accessibility, explicit requests. Non-trivial logic leaves one runnable check, written the way **Tests** below says.
+**Be relentless about:** input validation, error handling wherever data could be lost, security, accessibility, and explicit requests. Non-trivial logic ships with one runnable check, written as **Tests** below describes.
 
-**Multi-step work:** state assumptions, surface ambiguity, state the plan, push back on complexity before starting.
+**Multi-step work:** before starting, state assumptions, raise ambiguities, outline the plan, and push back on unnecessary complexity.
 
 # Communication
 
-Caveman. Technical substance stays, fluff dies.
+Write tersely: every sentence carries a fact, a decision, or a risk. Sentence fragments are fine; technical terms are exact.
 
-- Drop articles, filler, pleasantries, hedging. Fragments fine. Technical terms exact.
-- Shape: `[thing] [action] [reason]`.
-- Feedback received: agree or disagree first, then what changed.
-- Non-trivial design: problem, concrete trace, solution. Say why the solution is necessary.
-- Full prose for: security warnings, irreversible actions, code, commits, PRs.
+- Structure statements as `[subject] [action] [reason]`.
+- When receiving feedback, state agreement or disagreement first, then what changed.
+- For non-trivial design, give the problem, a concrete trace, and the solution, and explain why the solution is necessary.
+- Write in full prose for security warnings, irreversible actions, code, commits, and PRs.
 
 # Before pushing
 
 `README.md` is the command table; `pyproject.toml` holds every tool's config. Done means CI's four jobs pass locally: `uv run pre-commit run --all-files` (Lint: ruff, ty, zizmor, uv-lock, file hygiene), `uv run pytest` (Test), the image builds (Docker), and `scripts/kind-smoke.sh` (Kind Smoke).
 
+- **Commits**: conventional commits, imperative lowercase subject, 72 columns.
 - **Warnings are errors** (`filterwarnings = ["error"]`). Fix a deprecation at its cause, the way `httpx2` replaced `httpx` for Starlette's `TestClient`; a warning filter needs the user's OK.
 - **Suppressions** name the rule and the reason: `# noqa: S301  provided dataset`, `# ty: ignore[<rule>]  <reason>`. ty is beta: a ty bump that adds diagnostics lands with its fixes.
 - **Deps** move through `uv add` / `uv remove`: `--group dev` for tooling, `--group analysis` for exercise-1-only libraries. Runtime `dependencies` is exactly what the Docker image ships, so it holds only what `src/` imports.
@@ -58,7 +55,7 @@ Caveman. Technical substance stays, fluff dies.
 ```
 src/
   api.py             composition root: Settings → clients → repositories → services → FastAPI app
-  config.py          Settings, the one environment-variable reader
+  config.py          Settings (pydantic-settings)
   schemas.py         pydantic models: FlightPlan, JobView, model file
   controllers/       FastAPI routers: parse request, call one service, map result or error to HTTP
   services/          business rules: tenants.py (registry), jobs.py (job queue: App, task, retry, status, identity), fuel.py (pipeline)
@@ -83,9 +80,7 @@ docker-compose.yaml  local stack
 - Config is one `pydantic-settings` class read at startup, the only place an environment variable is read. Credentials are `SecretStr`.
 - **Dependency injection** by default: every service, repository, and client takes its dependencies as constructor arguments typed by a `Protocol`. `api.py` builds the real ones once at startup, next to the config, and controllers receive services through FastAPI `Depends`, so tests hand in fakes.
 
-**Commits:** conventional commits, imperative lowercase subject, 72 columns.
-
-**Comments:** one or two lines carrying the why, the invariant, or the gotcha the code cannot show.
+**Comments:** one or two lines carrying the why, the invariant, or the gotcha the code cannot show. Mark an intentional shortcut with a `Limitation:` comment stating its limit and upgrade path; docs record it the same way, as **Limitation:**.
 
 **Docs:** `README.md` holds what to run (API, config, commands); `ARCHITECTURE.md` holds the design and why. Each fact lives in one of them. Short and plain: tables and one-line bullets, example numbers taken from a real run.
 
@@ -97,4 +92,4 @@ docker-compose.yaml  local stack
 - Tests run offline. Fakes are small hand-written classes that satisfy the seam's `Protocol`, typed so ty flags them when the seam changes; they live as fixtures in `tests/conftest.py` and enter through `app.dependency_overrides`. The queue itself is not faked: tests run the real task on Procrastinate's `InMemoryConnector`, and `run_workers()` is the explicit "a worker claimed it" step after `POST`.
 - Mocks need a reason: `unittest.mock`, `pytest-mock`, and `monkeypatch` of internals are a last resort for code no seam reaches, and every mock is one more copy of an interface to maintain. Refactor to a seam first; if a mock still lands, a comment names why the seam was impossible.
 - Name tests by behaviour (`test_rejects_unknown_airline`). Variants of one behaviour are one `@pytest.mark.parametrize` list.
-- Body is arrange / act / assert, blocks split by one blank line, no section comments.
+- Body is arrange / act / assert, with one blank line between the blocks as the only separator.
