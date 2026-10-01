@@ -38,7 +38,7 @@ Caveman. Technical substance stays, fluff dies.
 
 # Before pushing
 
-`README.md` is the command table; `pyproject.toml` holds every tool's config. Done means CI's three jobs pass locally: `uv run pre-commit run --all-files` (Lint: ruff, ty, zizmor, uv-lock, file hygiene), `uv run pytest` (Test), and the image builds (Docker).
+`README.md` is the command table; `pyproject.toml` holds every tool's config. Done means CI's four jobs pass locally: `uv run pre-commit run --all-files` (Lint: ruff, ty, zizmor, uv-lock, file hygiene), `uv run pytest` (Test), the image builds (Docker), and `scripts/kind-smoke.sh` (Kind Smoke).
 
 - **Warnings are errors** (`filterwarnings = ["error"]`). Fix a deprecation at its cause, the way `httpx2` replaced `httpx` for Starlette's `TestClient`; a warning filter needs the user's OK.
 - **Suppressions** name the rule and the reason: `# noqa: S301  provided dataset`, `# ty: ignore[<rule>]  <reason>`. ty is beta: a ty bump that adds diagnostics lands with its fixes.
@@ -52,7 +52,7 @@ Caveman. Technical substance stays, fluff dies.
 
 - `exercise_1/`: `analysis.ipynb` holds the narrative and calls `cleanup.py`, `compute.py`, `plot.py`, where the logic lives. After every change, Run All and save so committed outputs match the code. Dead ends stay in, each under a markdown cell saying what was tried and why it was dropped: the assignment grades the decision trail. Here addition beats deletion.
 - `src/`: the job processor service (exercise 2), imported as package `src` (`from src.config import Settings`, `python -m src.worker`), laid out as below. Design, decisions, and build plan: `ARCHITECTURE.md`; read it before changing the service's shape.
-- `scripts/`: dev tooling run against the service (`seed.py`: fake airline DEMO with a job in every status). `src/` holds only code the image ships; anything else lives here.
+- `scripts/`: dev tooling run against the service (`seed.py`: fake airline DEMO with a job in every status; `kind-smoke.sh`, `kind-dev.sh`: the chart on kind). `src/` holds only code the image ships; anything else lives here.
 
 ```
 src/
@@ -71,8 +71,8 @@ src/
 tests/
   conftest.py        fakes for every seam (JobStore over Procrastinate's InMemoryConnector, weather, clock); app fixture built through api.py; run_workers drains the queue
   test_<feature>.py  one file per user-facing feature
-deploy/              weather-stub/, helm/optifuel/, kind-smoke.sh, kind-dev.sh
-scripts/             seed.py
+deploy/              weather-stub/, helm/optifuel/
+scripts/             seed.py, kind-smoke.sh, kind-dev.sh
 docker-compose.yaml  local stack
 ```
 

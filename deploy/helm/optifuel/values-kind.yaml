@@ -1,4 +1,4 @@
-# kind smoke (`deploy/kind-smoke.sh`): image loaded into the node (tagged by the script), Postgres
+# kind smoke (`scripts/kind-smoke.sh`): image loaded into the node (tagged by the script), Postgres
 # and weather stub in the cluster. Models and the stub mapping come in with --set-file.
 image:
   pullPolicy: Never

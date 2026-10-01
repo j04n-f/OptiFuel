@@ -419,5 +419,5 @@ One image ships every process (§7). Two ways to run it:
   files and the stub mapping enter with `--set-file`, since a chart reads no file outside its
   directory. No Ingress template: the cluster's ingress fronts `optifuel-api`.
   `values-kind.yaml` enables an in-chart Postgres StatefulSet, installed as a `pre-install` hook
-  so it exists before the migrate hook, and the WireMock stub; `deploy/kind-smoke.sh` exercises
+  so it exists before the migrate hook, and the WireMock stub; `scripts/kind-smoke.sh` exercises
   the chart end to end on kind (§8 behaviours: backlog scaling, worker death mid-job, KEDA off).

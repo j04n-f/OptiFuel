@@ -80,3 +80,17 @@ jobs:
           tags: optifuel:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  kind:
+    name: Kind Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # kind, helm, kubectl, jq and openssl come preinstalled on ubuntu-latest.
+      - name: Run Kind Smoke
+        run: scripts/kind-smoke.sh

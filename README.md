@@ -171,20 +171,20 @@ front the `optifuel-api` Service with the cluster's ingress.
 
 ### Kind smoke
 
-`deploy/kind-smoke.sh` creates a kind cluster, installs KEDA, builds and loads the image, installs
+`scripts/kind-smoke.sh` creates a kind cluster, installs KEDA, builds and loads the image, installs
 the chart with in-cluster Postgres and weather stub (`values-kind.yaml`), then checks that a plan
 succeeds, that a backlog scales `worker-abc` past one replica, that a job whose worker pod is
 killed mid-run still succeeds, and that `keda.enabled=false` holds the minimum replica count.
 Needs docker, kind, helm, kubectl, curl, jq, openssl. The cluster is deleted on exit;
-`KEEP_CLUSTER=1` keeps it and prints its kubeconfig.
+`KEEP_CLUSTER=1` keeps it and prints its kubeconfig. CI runs it as the Kind Smoke job.
 
 ### Kind dev environment
 
-`deploy/kind-dev.sh` does the same install on cluster `optifuel-dev` (no checks), then
+`scripts/kind-dev.sh` does the same install on cluster `optifuel-dev` (no checks), then
 port-forwards the API to `localhost:18000`, the weather stub to `localhost:18080` and Postgres
 to `localhost:15432`, prints the `OPTIFUEL_DATABASE_URL` for `scripts/seed.py` and `src.cleanup`,
 and blocks until Ctrl-C. The cluster stays; a rerun rebuilds the image and rolls the pods;
-`deploy/kind-dev.sh down` deletes it. `API_PORT`, `STUB_PORT`, `PG_PORT` override the ports.
+`scripts/kind-dev.sh down` deletes it. `API_PORT`, `STUB_PORT`, `PG_PORT` override the ports.
 
 ### Docker image
 
@@ -219,8 +219,8 @@ uv run pre-commit install      # git hooks
 | Worker (one per airline) | `uv run python -m src.worker` with the worker variables above |
 | Migrate | `uv run python -m src.migrate` with `OPTIFUEL_DATABASE_URL` |
 | Cleanup | `uv run python -m src.cleanup` with `OPTIFUEL_DATABASE_URL` |
-| Kind smoke | `deploy/kind-smoke.sh` |
-| Kind dev environment | `deploy/kind-dev.sh` (`down` deletes the cluster) |
+| Kind smoke | `scripts/kind-smoke.sh` |
+| Kind dev environment | `scripts/kind-dev.sh` (`down` deletes the cluster) |
 | Exercise 1 notebook | `uv run jupyter lab exercise_1/analysis.ipynb` |
 
 ### Layout
@@ -240,8 +240,8 @@ src/
   sql/schema.sql
   static/            index.html, style.css, app.js
 tests/               end-to-end over TestClient with fakes at the outer edge; one file per feature
-deploy/              helm/optifuel, kind-smoke.sh, kind-dev.sh, weather-stub/
-scripts/             seed.py (dev tooling, not shipped in the image)
+deploy/              helm/optifuel, weather-stub/
+scripts/             seed.py, kind-smoke.sh, kind-dev.sh (dev tooling, not shipped in the image)
 models/              per-airline model files
 exercise_1/          fuel flow analysis
 ```
@@ -259,10 +259,10 @@ runs on its `InMemoryConnector`.
   Configuration lives in `pyproject.toml`; warnings are errors.
 - **pre-commit**: ruff, ty, zizmor (GitHub Actions audit; actions must be SHA-pinned), `uv.lock`
   sync check, file hygiene, private-key detection.
-- **GitHub Actions** (`.github/workflows/ci.yml`): three jobs, Lint, Test and Docker (image
-  build). **Dependabot** bumps uv dependencies, actions, and Docker images (Dockerfile, Compose,
-  Helm) weekly. `kindest/node` in `deploy/kind-smoke.sh` and `deploy/kind-dev.sh` is updated by
-  hand.
+- **GitHub Actions** (`.github/workflows/ci.yml`): four jobs, Lint, Test, Docker (image build)
+  and Kind Smoke (`scripts/kind-smoke.sh` on the runner's preinstalled kind, helm, kubectl).
+  **Dependabot** bumps uv dependencies, actions, and Docker images (Dockerfile, Compose, Helm)
+  weekly. `kindest/node` in `scripts/kind-smoke.sh` and `scripts/kind-dev.sh` is updated by hand.
 
 ## Exercise 1: fuel flow analysis
 
