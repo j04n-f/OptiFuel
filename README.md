@@ -1,36 +1,13 @@
 # OptiFuel
 
-OptiFuel is a multi-tenant job processor that turns airline flight plans into route fuel estimates.
-An airline submits a plan over HTTP, a worker dedicated to that airline runs the airline's own fuel
-model against the route and the forecast winds, and the airline polls the job until it holds a
-result or an error. The control plane (API, Postgres) is shared; compute, models and job data are
-isolated per airline.
+Multi-tenant service that turns airline flight plans into fuel estimates. An airline submits a
+plan; a worker dedicated to that airline runs the airline's own model against the route and the
+forecast winds; the airline polls for the result.
 
 ![OptiFuel page: flight plan editor with route and altitude charts on the left, live job table with status counts on the right](docs/ui.png)
 
-This repository also holds the fuel flow analysis that produced the model (`exercise_1/`, see
-[Exercise 1](#exercise-1-fuel-flow-analysis)).
-
-## Features
-
-- **One job contract.** `POST /v1/jobs` returns `202 {id}`; `GET /v1/jobs/{id}` tracks it through
-  `queued → running → succeeded | failed` with attempts, timestamps, result and last error.
-- **Tenant isolation.** Each airline has its own queue, worker deployment and model mount. An
-  airline sees only its own jobs; an unknown airline or a disabled aircraft type is rejected before
-  anything is queued.
-- **Physics-based estimate.** Fuel = Σ fuel flow × segment time over great-circle segments, with
-  ground speed corrected by the wind at each waypoint's ETA. A waypoint outside the model's
-  validity envelope fails the job explicitly rather than extrapolating.
-- **Resilient by construction.** Postgres is the only stateful dependency: queueing a job and
-  recording it share one transaction. Transient errors (weather API down, database blip) retry
-  with backoff; a worker that dies mid-job has its work requeued; duplicate submissions of a plan
-  that is still queued return the existing job.
-- **Elastic workers.** KEDA scales each airline's workers on that airline's backlog, so a busy
-  airline never starves another. The API scales on CPU.
-- **Operable.** `/health` and `/ready` probes, structured logs carrying `job_id` and `airline`, a
-  cleanup job that retries stalled work and purges finished jobs after a retention period.
-- **Built-in page.** A dependency-free static page to pick an airline, edit and submit a plan (with
-  a live route chart and altitude profile), and watch jobs update every two seconds.
+Design and decisions: [`ARCHITECTURE.md`](ARCHITECTURE.md). Vocabulary:
+[`GLOSSARY.md`](GLOSSARY.md). Model analysis: [Exercise 1](#exercise-1-fuel-flow-analysis).
 
 ## How it works
 
@@ -44,48 +21,15 @@ flowchart LR
     wabc & wxyz -- result --> pg
 ```
 
-- **API** (FastAPI): validates the plan, checks the tenant, queues the job. Stateless.
-- **Workers** (one deployment per airline, [Procrastinate](https://procrastinate.readthedocs.io/)
-  on Postgres): claim their airline's jobs, fetch winds, integrate fuel, write the result.
-- **Postgres**: queue and job records in one database; no broker.
+- **API** (FastAPI): validates the plan and the airline, queues the job. Stateless.
+- **Workers** ([Procrastinate](https://procrastinate.readthedocs.io/)): one deployment per
+  airline. Claim that airline's jobs, fetch winds, compute fuel, write the result.
+- **Postgres**: queue and results. No broker.
 - **Cleanup** (cron): requeues jobs from dead workers, purges old ones.
 
-Design, decisions and rejected alternatives: [`ARCHITECTURE.md`](ARCHITECTURE.md). Domain
-vocabulary: [`GLOSSARY.md`](GLOSSARY.md).
-
-### API
-
-Every `/v1` request carries the caller's airline in the `X-Airline` header (demo authentication;
-production swaps this one dependency for OIDC at the gateway).
-
-| Method | Path | Result |
-|---|---|---|
-| `POST` | `/v1/jobs` | `202 {"id": ...}`; a plan still queued returns the existing job's id |
-| `GET` | `/v1/jobs/{id}` | Job view; `404` if missing or owned by another airline |
-| `GET` | `/v1/jobs?limit=50` | Caller's jobs, newest first (`limit` 1..100) |
-| `GET` | `/v1/tenants` | Configured airline codes (feeds the page's selector) |
-| `GET` | `/health`, `/ready` | Liveness; readiness (`SELECT 1` against Postgres) |
-| `GET` | `/` | The page |
-
-Request body: `{"type": "fuel_estimate", "payload": <flight plan>}`. A flight plan is `airline`,
-`aircraft_type`, `registration`, `flight_id`, an optional timezone-aware `departure_time`, and at
-least two `waypoints`, each `{latitude, longitude, speed, altitude}` with speed as true airspeed
-in km/h and altitude in ft.
-
-```json
-{
-  "id": 42, "type": "fuel_estimate", "airline": "ABC", "flight_id": 1042,
-  "status": "succeeded", "attempts": 1,
-  "submitted_at": "2026-09-30T10:00:00Z", "finished_at": "2026-09-30T10:00:01Z",
-  "result": {"total_fuel_lb": 1.656, "distance_km": 220.498, "duration_h": 1.012,
-             "model_version": "2026-09-30"},
-  "error": null
-}
-```
-
-Rejections never reach the queue: `422` for a malformed plan, unknown job type or aircraft type
-not enabled for the airline; `401` for a missing or unknown `X-Airline`; `403` when
-`payload.airline` differs from the header.
+Each airline has its own queue, worker and model, and sees only its own jobs. Transient errors
+retry; a plan outside the model's valid range fails instead of extrapolating. KEDA scales each
+airline's workers on its own backlog.
 
 ## Quick start
 
@@ -95,18 +39,15 @@ Requires Docker with Compose v2.
 docker compose up --build
 ```
 
-This brings up Postgres, applies the schema, starts the API on <http://localhost:8000>, one worker
-each for airlines `ABC` and `XYZ`, the cleanup loop, a WireMock stand-in for the weather API, and
-seeds a fake airline `DEMO` with one job in every status so the page shows them all.
-
-Submit a plan from the shell:
+Starts Postgres, the API and page on <http://localhost:8000>, workers for airlines `ABC` and
+`XYZ`, cleanup, and a weather API stub. A demo airline `DEMO` is seeded with one job per status.
 
 ```sh
 curl -H 'X-Airline: ABC' -H 'Content-Type: application/json' localhost:8000/v1/jobs -d '{
   "type": "fuel_estimate",
   "payload": {
     "airline": "ABC", "aircraft_type": "B777", "registration": "EC-ABC", "flight_id": 1,
-    "waypoints": [
+    "route": [
       {"latitude": 41.3, "longitude": 2.1, "speed": 200, "altitude": 5000},
       {"latitude": 41.8, "longitude": 3.0, "speed": 180, "altitude": 4000}
     ]
@@ -115,44 +56,75 @@ curl -H 'X-Airline: ABC' -H 'Content-Type: application/json' localhost:8000/v1/j
 curl -H 'X-Airline: ABC' localhost:8000/v1/jobs/<id>
 ```
 
-Secrets default to development values; override them in a gitignored `.env` next to
-`docker-compose.yaml` (`POSTGRES_PASSWORD`, `OPTIFUEL_WEATHER_TOKEN`).
+Secrets default to dev values; override `POSTGRES_PASSWORD` and `OPTIFUEL_WEATHER_TOKEN` in a
+gitignored `.env`.
 
-## Running the services
+## API
 
-One image, four entry points:
+Every `/v1` call sends the caller's airline in `X-Airline` (mocked auth; production swaps it for
+OIDC).
+
+| Method | Path | Result |
+|---|---|---|
+| `POST` | `/v1/jobs` | `202 {"id": ...}`; a plan still queued returns the existing id |
+| `GET` | `/v1/jobs/{id}` | Job view; `404` if missing or another airline's |
+| `GET` | `/v1/jobs?limit=50` | Own jobs, newest first (`limit` 1–100) |
+| `GET` | `/v1/tenants` | Configured airlines (for the page) |
+| `GET` | `/health`, `/ready` | Liveness; readiness (Postgres reachable) |
+| `GET` | `/` | The page |
+
+Body: `{"type": "fuel_estimate", "payload": <flight plan>}`. A flight plan has `airline`,
+`aircraft_type`, `registration`, `flight_id`, optional `departure_time` (with timezone), and a
+`route` of at least two waypoints `{latitude, longitude, speed, altitude}`: speed is true
+airspeed in km/h, altitude in ft.
+
+```json
+{
+  "id": 42, "type": "fuel_estimate", "airline": "ABC", "flight_id": 1042,
+  "status": "succeeded", "attempts": 1,
+  "submitted_at": "2026-09-30T10:00:00Z", "finished_at": "2026-09-30T10:00:01Z",
+  "result": {"total_fuel_lb": 1.657, "distance_km": 220.498, "duration_h": 1.012,
+             "model_version": "2026-09-30"},
+  "error": null
+}
+```
+
+`status`: `queued → running → succeeded | failed`. Rejected before queueing: `401` unknown or
+missing airline, `403` plan airline differs from the header, `422` invalid plan, unknown job type
+or aircraft type not enabled.
+
+## Configuration
+
+One image, four processes:
 
 | Process | Command | Role |
 |---|---|---|
-| API | `uvicorn --factory src.api:from_env` (image default) | HTTP, page, probes |
-| Worker | `python -m src.worker` | One per airline; refuses to start without that airline's model |
-| Migrate | `python -m src.migrate` | One-shot: Procrastinate schema + `job_records` |
-| Cleanup | `python -m src.cleanup` | One-shot: requeue stalled jobs, purge finished ones |
-
-Configuration is environment variables, prefixed `OPTIFUEL_`:
+| API | `uvicorn --factory src.api:from_env` (default) | HTTP, page, probes |
+| Worker | `python -m src.worker` | One per airline; won't start without its model |
+| Migrate | `python -m src.migrate` | One-shot: apply schema |
+| Cleanup | `python -m src.cleanup` | One-shot: requeue stalled jobs, purge old ones |
 
 | Variable | Used by | Meaning |
 |---|---|---|
 | `OPTIFUEL_DATABASE_URL` | all | Postgres URL (secret) |
 | `OPTIFUEL_ENVIRONMENT` | all | `dev` (default) or `prod` |
 | `OPTIFUEL_TENANTS` | API, worker | JSON: `{"ABC": {"aircraft_types": ["B777"], "model_version": "2026-09-30"}}` |
-| `OPTIFUEL_WORKER_AIRLINE` | worker | Airline code this worker serves |
-| `OPTIFUEL_MODEL_DIR` | worker | Directory holding `<airline>/<version>.json`, default `/models` |
+| `OPTIFUEL_WORKER_AIRLINE` | worker | Airline this worker serves |
+| `OPTIFUEL_MODEL_DIR` | worker | Holds `<airline>/<version>.json`; default `/models` |
 | `OPTIFUEL_WEATHER_URL` | worker | Weather API base URL |
 | `OPTIFUEL_WEATHER_TOKEN` | worker | Weather API bearer token (secret) |
-| `OPTIFUEL_RETENTION_DAYS` | cleanup | Purge finished jobs after this many days, default 30 |
+| `OPTIFUEL_RETENTION_DAYS` | cleanup | Days to keep finished jobs; default 30 |
 
-Models are JSON files (`models/<AIRLINE>/<version>.json`) holding the fitted coefficients and
-the validity envelope; loading runs no code.
+Models are JSON files (`models/<AIRLINE>/<version>.json`): coefficients plus the valid range.
+Loading runs no code.
 
 ## Deployment
 
 ### Kubernetes (Helm)
 
-The chart at `deploy/helm/optifuel` renders the API (Deployment, Service, HPA), one worker
-Deployment plus model ConfigMap plus KEDA `ScaledObject` per airline listed under `tenants`, a
-migrate hook Job and the cleanup CronJob. Postgres is expected to be managed; KEDA is expected to
-be installed.
+`deploy/helm/optifuel` renders the API (Deployment, Service, HPA), per airline a worker, model
+ConfigMap and KEDA `ScaledObject`, the migrate hook and the cleanup CronJob. Expects managed
+Postgres and KEDA installed. No Ingress template: front `optifuel-api` with the cluster's ingress.
 
 ```sh
 kubectl create secret generic optifuel \
@@ -165,26 +137,18 @@ helm install optifuel deploy/helm/optifuel -f <values> \
   --set-file tenants.ABC.model=models/ABC/2026-09-30.json
 ```
 
-Values reference: [`deploy/helm/optifuel/values.yaml`](deploy/helm/optifuel/values.yaml). Set
-`keda.enabled=false` to pin each worker at its minimum replicas. There is no Ingress template:
-front the `optifuel-api` Service with the cluster's ingress.
+Values: [`values.yaml`](deploy/helm/optifuel/values.yaml). `keda.enabled=false` pins workers at
+their minimum replicas.
 
-### Kind smoke
+### Kind
 
-`scripts/kind-smoke.sh` creates a kind cluster, installs KEDA, builds and loads the image, installs
-the chart with in-cluster Postgres and weather stub (`values-kind.yaml`), then checks that a plan
-succeeds, that a backlog scales `worker-abc` past one replica, that a job whose worker pod is
-killed mid-run still succeeds, and that `keda.enabled=false` holds the minimum replica count.
-Needs docker, kind, helm, kubectl, curl, jq, openssl. The cluster is deleted on exit;
-`KEEP_CLUSTER=1` keeps it and prints its kubeconfig. CI runs it as the Kind Smoke job.
-
-### Kind dev environment
-
-`scripts/kind-dev.sh` does the same install on cluster `optifuel-dev` (no checks), then
-port-forwards the API to `localhost:18000`, the weather stub to `localhost:18080` and Postgres
-to `localhost:15432`, prints the `OPTIFUEL_DATABASE_URL` for `scripts/seed.py` and `src.cleanup`,
-and blocks until Ctrl-C. The cluster stays; a rerun rebuilds the image and rolls the pods;
-`scripts/kind-dev.sh down` deletes it. `API_PORT`, `STUB_PORT`, `PG_PORT` override the ports.
+- `scripts/kind-smoke.sh`: creates a kind cluster with KEDA, in-cluster Postgres and weather stub,
+  then checks that a plan succeeds, a backlog scales workers, a job survives its worker being
+  killed, and KEDA off holds the minimum. Deletes the cluster on exit (`KEEP_CLUSTER=1` keeps
+  it). CI runs it. Needs docker, kind, helm, kubectl, curl, jq, openssl.
+- `scripts/kind-dev.sh`: same install, no checks, on cluster `optifuel-dev`. Forwards API
+  `:18000`, weather stub `:18080`, Postgres `:15432` (override with `API_PORT`, `STUB_PORT`,
+  `PG_PORT`). A rerun rebuilds and rolls the pods; `down` deletes the cluster.
 
 ### Docker image
 
@@ -193,12 +157,11 @@ docker build -t optifuel .
 docker run --rm -p 8000:8000 -e OPTIFUEL_DATABASE_URL=postgresql://unused optifuel
 ```
 
-Runs the API alone: `/health` and `/` answer, `/ready` needs Postgres. The image installs runtime
-dependencies only and runs as a non-root user.
+Runs the API alone; `/ready` needs Postgres. Runtime dependencies only, non-root user.
 
 ## Development
 
-Requires [uv](https://docs.astral.sh/uv/); it installs the pinned Python (`.python-version`).
+Requires [uv](https://docs.astral.sh/uv/), which installs the pinned Python.
 
 ```sh
 uv sync                        # venv + all groups (dev, analysis)
@@ -208,65 +171,54 @@ uv run pre-commit install      # git hooks
 | Task | Command |
 | --- | --- |
 | Tests + coverage | `uv run pytest` |
-| Lint + format + type check (all hooks) | `uv run pre-commit run --all-files` |
-| Lint / fix | `uv run ruff check --fix` |
-| Format | `uv run ruff format` |
-| Type check | `uv run ty check` |
-| Local stack | `docker compose up --build`; page and API on `localhost:8000` |
-| Re-seed demo data (airline `DEMO`, one job per status) | `docker compose run --rm seed`. Outside compose: `uv run python scripts/seed.py` with `OPTIFUEL_DATABASE_URL`; refuses when `OPTIFUEL_ENVIRONMENT=prod` |
+| All checks (ruff, ty, zizmor, lockfile, hygiene) | `uv run pre-commit run --all-files` |
+| Lint / format / types | `uv run ruff check --fix`, `uv run ruff format`, `uv run ty check` |
+| Local stack | `docker compose up --build` |
+| Re-seed demo data | `docker compose run --rm seed` (or `uv run python scripts/seed.py`; refuses in `prod`) |
 | Run cleanup once | `docker compose run --rm cleanup python -m src.cleanup` |
-| API (dev, reload) | `OPTIFUEL_DATABASE_URL=postgresql://... uv run uvicorn --factory src.api:from_env --reload` |
-| Worker (one per airline) | `uv run python -m src.worker` with the worker variables above |
-| Migrate | `uv run python -m src.migrate` with `OPTIFUEL_DATABASE_URL` |
-| Cleanup | `uv run python -m src.cleanup` with `OPTIFUEL_DATABASE_URL` |
-| Kind smoke | `scripts/kind-smoke.sh` |
-| Kind dev environment | `scripts/kind-dev.sh` (`down` deletes the cluster) |
+| API with reload | `OPTIFUEL_DATABASE_URL=postgresql://... uv run uvicorn --factory src.api:from_env --reload` |
+| Worker, migrate, cleanup | `uv run python -m src.<worker\|migrate\|cleanup>` with the variables above |
+| Kind smoke / dev | `scripts/kind-smoke.sh`, `scripts/kind-dev.sh` |
 | Exercise 1 notebook | `uv run jupyter lab exercise_1/analysis.ipynb` |
+
+CI (`.github/workflows/ci.yml`) runs four jobs: Lint, Test, Docker, Kind Smoke. Warnings are
+errors; tool config lives in `pyproject.toml`. Dependabot bumps dependencies, actions and images
+weekly; `kindest/node` in the kind scripts is bumped by hand.
 
 ### Layout
 
 ```
 src/
-  api.py             composition root: Settings → clients → repositories → services → FastAPI app
-  config.py          Settings, the one environment-variable reader
-  schemas.py         pydantic models: FlightPlan, JobView, model file
-  controllers/       FastAPI routers: parse request, call one service, map result or error to HTTP
-  services/          business rules: tenants.py (registry), jobs.py (queue), fuel.py (pipeline)
-  repositories/      persistence: protocols.py (JobStore), postgres.py, files.py (models)
-  clients/           external I/O: weather.py, clock.py
-  worker.py          worker process
-  migrate.py         one-shot: apply schema
-  cleanup.py         one-shot: retry stalled jobs, purge old ones
-  sql/schema.sql
-  static/            index.html, style.css, app.js
-tests/               end-to-end over TestClient with fakes at the outer edge; one file per feature
-deploy/              helm/optifuel, weather-stub/
-scripts/             seed.py, kind-smoke.sh, kind-dev.sh (dev tooling, not shipped in the image)
-models/              per-airline model files
-exercise_1/          fuel flow analysis
+  api.py          composition root: settings → clients → repositories → services → app
+  config.py       Settings, the only environment reader
+  schemas.py      pydantic models: FlightPlan, JobView, model file
+  controllers/    HTTP routers
+  services/       rules: tenants.py, jobs.py (queue), fuel.py (estimate)
+  repositories/   storage: protocols.py, postgres.py, files.py (models)
+  clients/        external I/O: weather.py, clock.py
+  worker.py, migrate.py, cleanup.py
+  sql/, static/
+tests/            end-to-end over HTTP, fakes at the edges, one file per feature
+deploy/           Helm chart, weather stub
+scripts/          dev tooling (not in the image)
+models/           per-airline model files
+exercise_1/       fuel flow analysis
 ```
-
-Calls flow controller → service → repository or client, one direction. Every repository and
-client is a `Protocol` injected at construction; `api.py` builds the real ones at startup and tests
-hand in fakes through `app.dependency_overrides`. Tests run offline: the real Procrastinate task
-runs on its `InMemoryConnector`.
-
-### Tooling
-
-- **uv**: environment, Python version, lockfile. Dependency groups: `dev` (tests, lint, types),
-  `analysis` (JupyterLab, plotting).
-- **ruff** (lint + format), **ty** (type checker; any diagnostic fails), **pytest** + **pytest-cov**.
-  Configuration lives in `pyproject.toml`; warnings are errors.
-- **pre-commit**: ruff, ty, zizmor (GitHub Actions audit; actions must be SHA-pinned), `uv.lock`
-  sync check, file hygiene, private-key detection.
-- **GitHub Actions** (`.github/workflows/ci.yml`): four jobs, Lint, Test, Docker (image build)
-  and Kind Smoke (`scripts/kind-smoke.sh` on the runner's preinstalled kind, helm, kubectl).
-  **Dependabot** bumps uv dependencies, actions, and Docker images (Dockerfile, Compose, Helm)
-  weekly. `kindest/node` in `scripts/kind-smoke.sh` and `scripts/kind-dev.sh` is updated by hand.
 
 ## Exercise 1: fuel flow analysis
 
-`exercise_1/analysis.ipynb` (outputs committed) explores the provided `signals_*.pkl` datasets and
-fits the fuel flow model that OptiFuel ships (`ff ≈ 346 600 · v / h²`, `v` in km/h, `h` in ft,
-valid for 24–238 km/h and 1 000–10 000 ft). The notebook holds the narrative; `cleanup.py`,
+`exercise_1/analysis.ipynb` (outputs committed) finds the fuel flow rule OptiFuel ships. The
+notebook tells the story and explains each statistics idea where it is used; `cleanup.py`,
 `compute.py` and `plot.py` hold the logic.
+
+1. **Clean**: 4000 rows become 582 points. Drop padding, 7 spikes and 3 flights with broken
+   sensors (7, 12, 44); keep one row per steady step, so copies don't count as new evidence.
+2. **Look**: correlation with fuel on log scales: altitude −0.90, speed +0.42, wind −0.04.
+3. **Fit**: linear regression on log scales gives `ff ≈ 346 600 · v / h²` (`v` km/h, `h` ft).
+   Twice as fast, twice the fuel; twice as high, a quarter.
+4. **Check**: split by whole flight, 78 to fit and 19 hidden. On the hidden flights the error is
+   about 1% (MAPE 0.97%, R² 0.99985).
+5. **Wind**: adding it changes nothing. Speed is airspeed, so wind changes time over the
+   ground, not fuel per hour.
+
+Valid only for 24–238 km/h and 1000–10 000 ft, the range of the data.

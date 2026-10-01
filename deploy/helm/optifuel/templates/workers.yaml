@@ -80,7 +80,7 @@ spec:
   triggers:
     - type: postgresql
       metadata:
-        # Queue name as `queue_name()` in src/repositories/postgres.py builds it: keep in step.
+        # Queue name as `queue_name()` in src/services/jobs.py builds it: keep in step.
         query: >-
           SELECT count(*) FROM procrastinate_jobs
           WHERE queue_name = 'airline.{{ $code }}' AND status IN ('todo', 'doing')

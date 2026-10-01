@@ -1,18 +1,11 @@
 # OptiFuel architecture
 
-OptiFuel receives airline flight plans as events, estimates route fuel with each airline's own
-model, and stores the result. This document describes the system as built: shape, decisions, job
-contract, data model, tenant isolation, fuel computation, seams, configuration, scaling and
-failure behaviour. Setup, commands and deployment steps: `README.md`.
+How OptiFuel is built and why. Setup, API and commands: [`README.md`](README.md).
 
-Guiding rule: least machinery that meets the brief. Every "not now" below names the trigger that
-would bring it in.
+## 1. Overview
 
-## 1. Shape: control plane + data plane
-
-- **Control plane**: the API and Postgres. Registers jobs, exposes one tracking contract, cleans up.
-- **Data plane**: one worker Deployment per airline. Claims that airline's jobs, runs inference,
-  writes results.
+- **Control plane**, shared: API, Postgres, cleanup.
+- **Data plane**, per airline: one worker Deployment and that airline's model.
 
 ```mermaid
 flowchart LR
@@ -57,68 +50,45 @@ flowchart LR
     mig -- schema --> pg
 ```
 
+**Event-driven.** A flight plan is an event. The API validates it and appends it to the airline's
+queue; it never calls a worker. Workers consume at their own pace, so each side scales and fails
+on its own. HTTP is only the entry point.
+
+### At a glance
+
+| Question | Answer |
+|---|---|
+| How do events enter? | `POST /v1/jobs`. The API validates the plan, queues it on `airline.<CODE>` and records the job in one transaction, then answers `202 {id}`. The client polls. |
+| Where are models stored? | JSON files `<CODE>/<version>.json`: coefficients and validity envelope, no code. On Kubernetes, one ConfigMap per airline, mounted only into that airline's worker. |
+| How is the model picked? | By routing. Only the airline's worker reads the airline's queue, and it loaded the version set in config at startup. It checks the file's own `airline` and `version`. |
+| How are tenants isolated? | Own queue, worker and model per airline. Shared API and Postgres, every query filtered by airline. |
+| How do workers scale? | KEDA scales each airline's workers on that airline's backlog. The API scales on CPU. |
+| What survives a failure? | Queued jobs, in Postgres. Transient errors retry; a dead worker's jobs are requeued. |
+| How does it extend? | A new step is one function call; a new job type or model family is one more union member (§7). |
+
 ## 2. Decisions
 
 | # | Decision | Rejected | Why |
 |---|---|---|---|
-| D1 | Control plane / data plane split. One generic job contract (`id, type, airline, status, attempts, timestamps, result, error`) and a job-type registry holding one type, `fuel_estimate`. | Generic multi-team job platform; OptiFuel-only code with no contract. | New job types and pipeline steps plug in without reshaping the API. A platform nobody asked for is YAGNI. |
-| D2 | Long-running worker Deployments pulling from a queue. | Kubernetes `Job` per event; operator with an `InferenceJob` CRD; KEDA `ScaledJob`. | Inference takes milliseconds, pod start takes seconds. etcd is not a job store. Workers keep the model in memory. |
-| D3 | Postgres only: queue, job records, results. | Kafka / Pub/Sub; Redis queue + Postgres. | Around 10⁵ flights/day worldwide, so tens of events/s at peak [inference], far below a Postgres queue's ceiling. Deferring the job and writing its record share one transaction, so no dual-write. One stateful dependency. |
-| D4 | Procrastinate 3.10 as the queue library. | Hand-rolled `SKIP LOCKED`; PgQueuer; DBOS; oban-py; chancy; bullmq (Postgres backend). | Most mature Postgres queue for Python. Has per-queue workers, retries limited to listed exceptions, heartbeat stall detection, `delete_old_jobs`, and an in-memory connector. PgQueuer moves finished jobs to a log table. DBOS needs its paid Conductor to recover a dead pod's work. oban-py is beta. bullmq's Postgres backend is 2 months old. |
-| D5 | HTTP ingress: `POST /v1/jobs` returns `202 {id}`. Clients poll. | Airlines publish to a broker; webhooks; SSE. | Simplest contract an airline can call. Polling needs no extra infrastructure. |
-| D6 | Tenant isolation: per-airline queue, worker Deployment and model mount. Shared API and Postgres, filtered by airline. | Shared worker pool loading any model; namespace or database per airline. | A worker can only read its own airline's model, and a busy airline can't starve the others. Namespace-per-airline is the premium tier: the same chart installed once per namespace. |
-| D7 | Models are JSON parameters with a validity envelope, keyed by airline, version pinned in config, read through a `ModelRepository` interface. | joblib/pickle; ONNX. | Loading runs no code. The Q4 model is 3 numbers. The loader dispatches on `form`, so a new model family means a new loader. |
-| D8 | Fuel = Σ fuel flow × segment time, with ground speed corrected by wind. A waypoint outside the model envelope fails the job. | Ignoring wind; extrapolating; clamping. | Exercise 1: wind doesn't change fuel flow (speed is airspeed) but does change time over ground. Underestimating fuel is a safety risk, so fail loud. |
-| D9 | Mocked auth: the `X-Airline` header is trusted by one FastAPI dependency. | Full API-key/OIDC flow in the MVP. | MVP scope. Isolation rules (401/403/404) are still enforced and tested. Production swaps only that dependency for OIDC at the gateway. |
-| D10 | One static HTML page served by FastAPI. | SPA with a build chain; PgQueuer-style ops dashboard. | Launch + track is one form and one table. No build tooling, same image. |
-| D11 | Helm chart for Kubernetes; docker compose for local dev; kind smoke script. | Kustomize; compose only. | Helm's `range` over `tenants` renders per-airline resources from one list. |
-| D12 | Logs with `job_id` and `airline`, `/health`, `/ready`. | Metrics/tracing in the MVP. | Enough to operate a PoC. Metrics are the first addition (§10). |
-| D13 | Duplicate = same plan key while its job is still queued, enforced by the queue's `queueing_lock` alone. Once claimed, the same plan makes a new job. | Application-level "latest unfinished job for this plan" check; reusing finished jobs. | One implementation of "same plan" (the lock's partial unique index). Reusing a finished estimate serves stale winds, a safety risk (D8). A duplicate estimate during the ~1 s a job runs costs one weather call. |
+| D1 | One generic job contract (`id, type, airline, status, attempts, timestamps, result, error`). `fuel_estimate` is the only type. | Multi-team job platform; no contract. | New job types fit without API changes. A platform nobody asked for is YAGNI. |
+| D2 | Long-running workers pulling from a queue. | Kubernetes `Job` per event; CRD operator; KEDA `ScaledJob`. | Inference takes milliseconds, pod start takes seconds. Workers keep the model in memory. |
+| D3 | Postgres holds queue, records and results. | Kafka / Pub/Sub; Redis + Postgres. | ~10⁵ flights/day is tens of events/s at peak (estimate), well within Postgres. Queue and record share one transaction. One stateful dependency. |
+| D4 | Procrastinate as the queue library. | Hand-rolled `SKIP LOCKED`; PgQueuer; DBOS; oban-py. | Mature. Per-queue workers, selective retries, heartbeat stall detection, retention, in-memory connector for tests. |
+| D5 | HTTP in, polling out. | Broker ingress; webhooks; SSE. | Simplest for an airline; no extra infrastructure. |
+| D6 | Per-airline queue, worker and model mount. | Shared worker pool; namespace or database per airline. | A worker can't read another airline's model; a busy airline can't starve the others. Namespace per airline is the premium tier, same chart. |
+| D7 | Models as JSON parameters plus envelope, version pinned in config. | pickle / joblib; ONNX. | Loading runs no code. The model is 3 numbers. |
+| D8 | Fuel = Σ fuel flow × segment time, with wind-corrected ground speed. Outside the envelope, the job fails. | Ignore wind; extrapolate; clamp. | Wind doesn't change fuel flow but does change time over ground. Underestimating fuel is a safety risk. |
+| D9 | Mocked auth: trusted `X-Airline` header. | OIDC or API keys now. | PoC scope. Isolation rules are still enforced and tested; one dependency to swap. |
+| D10 | Static page, no build step. | SPA. | One form and one table. |
+| D11 | Helm for Kubernetes, compose for local, kind smoke in CI. | Kustomize. | Helm loops over `tenants` to render per-airline resources. |
+| D12 | Logs with `job_id` and `airline`; `/health`, `/ready`. | Metrics and tracing now. | Enough for a PoC. Metrics come first (§9). |
+| D13 | Duplicate = same plan while still queued, via the queue's lock. Once claimed, a new job. | App-level dedupe; reusing finished results. | One mechanism. A reused result has stale winds. |
 
-**When Kafka earns its place**: several independent consumers of flight-plan events, a replay or
-audit-stream requirement, or joining an existing event backbone. The ingress adapter then
-consumes a topic and defers jobs exactly like the HTTP handler. Workers don't change.
+**Kafka** earns its place when several consumers need the events, replay or audit is required,
+or there is an event backbone to join. The ingress then reads a topic and queues jobs the same
+way; workers don't change.
 
-## 3. Job contract
-
-### API
-
-| Method | Path | Result |
-|---|---|---|
-| `POST` | `/v1/jobs` | `202 {"id": ...}`, or the existing job's id for a duplicate plan |
-| `GET` | `/v1/jobs/{id}` | Job view below; `404` if missing or owned by another airline |
-| `GET` | `/v1/jobs?limit=50` | Caller's airline's jobs, newest first; `limit` 1..100, default 50 |
-| `GET` | `/v1/tenants` | Configured airline codes, for the page's selector. `ponytail:` exists only because auth is mocked; removed with real auth. |
-| `GET` | `/health` | Liveness: process up |
-| `GET` | `/ready` | Readiness: `SELECT 1` against Postgres |
-| `GET` | `/` | Static page |
-
-Body of `POST /v1/jobs`: `{"type": "fuel_estimate", "payload": <FlightPlan>}`.
-
-Job view:
-
-```json
-{
-  "id": 42, "type": "fuel_estimate", "airline": "ABC", "flight_id": 123,
-  "status": "succeeded", "attempts": 1,
-  "submitted_at": "2026-09-30T10:00:00Z", "finished_at": "2026-09-30T10:00:01Z",
-  "result": {"total_fuel_lb": 10.9, "distance_km": 812.3, "duration_h": 3.9,
-             "model_version": "2026-09-30"},
-  "error": null
-}
-```
-
-### Rejected at the API, never queued
-
-| Condition | Status |
-|---|---|
-| Payload fails `FlightPlan` / job-type schema | 422 |
-| `X-Airline` missing or not configured | 401 |
-| `payload.airline` differs from `X-Airline` | 403 |
-| `aircraft_type` not enabled for the airline | 422 |
-| Unknown job `type` | 422 |
-
-### Lifecycle
+## 3. Job lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -132,24 +102,13 @@ stateDiagram-v2
     failed --> [*]: purged after 30 d
 ```
 
-Procrastinate status maps to the contract in the job queue module: `todo → queued`,
-`doing → running`, `succeeded`, `failed`. `cancelled` and `aborted` are unreachable: there is no
-cancel endpoint.
-
-- **Transient**: weather timeout, connection error or 5xx (the client raises
-  `WeatherUnavailableError`); Postgres `OperationalError`. Retried via
-  `RetryStrategy(max_attempts=2, exponential_wait=5, retry_exceptions={...})`: `max_attempts`
-  counts retries, so 3 attempts, waiting 5 s then 25 s.
-- **Permanent**: everything else, e.g. `out_of_envelope`, ground speed ≤ 0, a weather 4xx or
-  malformed reply. Fail at once. A missing model never reaches a job: the worker refuses to
-  start (§5).
-- **Dead letters**: `failed` jobs with their `error`. Resubmitting the same plan creates a new job.
-- **Duplicates** (D13): `plan_key = sha256(canonical payload)`, hashed before `departure_time`
-  defaults. The defer carries `queueing_lock = "{airline}:{plan_key}"`; while a job holding it is
-  still queued, Procrastinate raises `AlreadyEnqueued` and the API answers with that job's id.
-  Once claimed, whatever its outcome, the same plan queues a new job.
-
-### Submit → result
+- **Transient**, retried (3 attempts, waits 5 s then 25 s): weather timeout, connection error or
+  5xx; Postgres `OperationalError`.
+- **Permanent**, fails at once: out of envelope, ground speed ≤ 0, weather 4xx or malformed reply.
+- **Rejected before queueing**: see the README's API section (401, 403, 422).
+- **Duplicates** (D13): `plan_key = sha256(payload)`, hashed before `departure_time` defaults.
+  While a job with lock `{airline}:{plan_key}` is queued, the API returns that job's id.
+- A failed job keeps its last error. Resubmitting creates a new job.
 
 ```mermaid
 sequenceDiagram
@@ -173,251 +132,116 @@ sequenceDiagram
     A-->>C: 200 job view
 ```
 
-## 4. Data model
+## 4. Data
 
-Procrastinate owns `procrastinate_jobs` (queue, status, attempts, args, heartbeat worker). We own
-one table:
-
-```sql
-CREATE TABLE IF NOT EXISTS job_records (
-    job_id       bigint PRIMARY KEY REFERENCES procrastinate_jobs (id) ON DELETE CASCADE,
-    airline      text        NOT NULL,
-    type         text        NOT NULL,
-    flight_id    bigint      NOT NULL,
-    plan_key     text        NOT NULL,
-    submitted_at timestamptz NOT NULL,
-    finished_at  timestamptz,
-    result       jsonb,
-    error        text
-);
-CREATE INDEX IF NOT EXISTS job_records_airline_submitted
-    ON job_records (airline, submitted_at DESC);
-CREATE INDEX IF NOT EXISTS job_records_plan ON job_records (airline, plan_key);
-```
-
-- Status has one source: `procrastinate_jobs.status`. Payload, outcome and timestamps come from
-  `job_records`.
-- Job args: `{"flight_plan": {...}}`; the Procrastinate task name is the job type
-  (`fuel_estimate`). Queue: `airline.<CODE>`.
-- The worker writes `error` on every failed attempt, so a job that fails for good keeps its last
-  error. Success writes `result` and clears `error`.
-- `delete_old_jobs` deletes old jobs; `ON DELETE CASCADE` removes their records.
-- The API writes `job_records` in the same transaction as the defer:
-  `App.configure_task(..., connection=conn).defer(...)` (Procrastinate 3.10) runs the job insert
-  on the API's own connection, inside its transaction.
+- `procrastinate_jobs` (owned by Procrastinate): queue, status, attempts. The only source of
+  status.
+- `job_records` (ours, [`src/sql/schema.sql`](src/sql/schema.sql)): airline, type, flight id, plan
+  key, timestamps, result, error. Deleted with its job (`ON DELETE CASCADE`).
+- The API writes both in one transaction: `configure_task(..., connection=conn).defer(...)`.
+- The worker writes `error` on every failed attempt; success writes `result` and clears `error`.
 
 ## 5. Tenant isolation
 
-| Asset | Isolation | Mechanism |
+| Asset | Isolation | How |
 |---|---|---|
-| Compute | Physical per airline | Own worker Deployment and KEDA scaler |
-| Queue | Logical | `queue_name = airline.<CODE>`; a worker listens to its own queue only |
-| Model | Physical | Airline's ConfigMap mounted only into its worker; no other worker can read it |
-| Job data | Logical | Every query filters by the caller's airline; other airlines' jobs return 404 |
+| Compute | Physical | Own worker Deployment and KEDA scaler |
+| Model | Physical | Own ConfigMap, mounted only into its worker |
+| Queue | Logical | `airline.<CODE>`; a worker listens to its own queue only |
+| Job data | Logical | Every query filters by airline; another airline's job is 404 |
 | Identity | Mocked | `X-Airline` header (D9) |
 
-The worker refuses to start if `OPTIFUEL_WORKER_AIRLINE` has no model mounted: no default model,
-no shared fallback.
+A worker without its airline's model refuses to start. No default model, no shared fallback.
 
-`ponytail:` job data is isolated in application code only. Upgrade path: Postgres row-level
-security keyed on a per-transaction `app.airline` setting, then database-per-airline for the
-premium tier.
+**Limitation:** job data is isolated in application code only. Upgrade: Postgres row-level
+security, then a database per airline.
 
 ## 6. Fuel estimation
 
-Model (exercise 1, Q4), fitted in log space on all flights:
+Model from exercise 1 (Q4): linear regression on log scales. Validated by fitting 78 flights and
+checking 19 hidden ones (about 1% error), then refit on all 97 flights. The 95% confidence
+intervals of the exponents contain exactly 1 and −2.
 
-$$ff = e^{12.75644}\, v^{0.99981}\, h^{-1.99903} \approx 346\,600 \cdot \frac{v}{h^{2}}$$
+$$ff = e^{12.75604}\, v^{1.00009}\, h^{-1.99912} \approx 346\,600 \cdot \frac{v}{h^{2}}$$
 
-`ff` in lb/h, `v` = true airspeed in km/h, `h` in ft. Validated only for 24–238 km/h and
-1000–10 000 ft.
-
-The coefficients come from the simulated dataset, whose fuel flow is 0.08–84 lb/h where a real
-airliner burns thousands. Estimates are faithful to that data (median model/data ratio 1.00) and
-compare routes correctly, but are not real-world pounds: a 93 km hop at 200 km/h and 5000 ft
-comes out at 1.2 lb.
-
-Model file (`models/ABC/2026-09-30.json`):
+`ff` in lb/h, `v` true airspeed in km/h, `h` altitude in ft. Valid for 24–238 km/h and
+1000–10 000 ft. The data is simulated (0.08–84 lb/h, where an airliner burns thousands), so
+results compare routes correctly but are not real-world pounds.
 
 ```json
 {
   "airline": "ABC", "version": "2026-09-30", "form": "power_law",
-  "coefficients": {"ln_c": 12.75644, "speed": 0.99981, "altitude": -1.99903},
+  "coefficients": {"ln_c": 12.75604, "speed": 1.00009, "altitude": -1.99912},
   "envelope": {"speed_kmh": [24, 238], "altitude_ft": [1000, 10000]}
 }
 ```
 
-Route computation, for segment *i* from waypoint *i* to *i+1*:
+Per segment *i* (waypoint *i* to *i+1*):
 
-1. Reject the job (`out_of_envelope`, listing indices) if any waypoint is outside the model's
-   envelope.
-2. `dᵢ`: great-circle distance (haversine, R = 6371 km); `θᵢ`: initial bearing.
-3. ETAs from still-air time (`dᵢ / vᵢ`) starting at `departure_time` (default: received time).
-   One batched weather call for all waypoints and ETAs returns wind speed `wᵢ` (kt) and
-   from-direction `φᵢ`. `ponytail:` ETAs ignore wind, so the lookup times are approximate;
-   iterate once with ground-speed ETAs if forecast error matters.
+1. Any waypoint outside the envelope fails the job (`out_of_envelope`, with indices).
+2. Distance `dᵢ` (haversine) and bearing `θᵢ`.
+3. ETAs from still-air time, starting at `departure_time` (default: time received). One weather
+   call returns wind speed `wᵢ` (kt) and direction `φᵢ` for all waypoints. Limitation: ETAs
+   ignore wind; iterate once with ground-speed ETAs if forecast error matters.
 4. Ground speed `gsᵢ = vᵢ − 1.852 · wᵢ · cos(φᵢ − θᵢ)`. `gsᵢ ≤ 0` fails the job.
-5. `fuelᵢ = ff(vᵢ, hᵢ) · dᵢ / gsᵢ`. Result: `Σ fuelᵢ`, `Σ dᵢ`, `Σ dᵢ/gsᵢ`, model version.
+5. `fuelᵢ = ff(vᵢ, hᵢ) · dᵢ / gsᵢ`. Result: total fuel, distance, duration, model version.
 
-`FlightPlan` validation: `airline` code, `aircraft_type`, `registration`, `flight_id`, at least
-2 waypoints, latitude ∈ [-90, 90], longitude ∈ [-180, 180], `speed` > 0 (km/h airspeed, stated in
-the schema), `altitude` > 0 (ft), optional `departure_time` (timezone-aware).
+## 7. Code structure
 
-The assignment's sample plan cruises at 35 000 ft, so it fails with `out_of_envelope`. The page
-and smoke test use an in-envelope plan.
+Calls flow one way: controllers (HTTP) → services (rules) → repositories (storage) and clients
+(external I/O). Dependencies are passed in, typed by a `Protocol`, so tests hand in fakes.
 
-## 7. Components and seams
-
-Layers: controllers (HTTP) → services (business rules) → repositories (persistence) and clients
-(external I/O). Every repository and client is a `Protocol` passed in at construction, so tests
-hand in fakes:
-
-| Seam | Real implementation | Used by |
+| Seam | Real | In tests |
 |---|---|---|
-| `JobStore`: `ping`, `submit`, `get`, `recent`, `queued`, `record_success`, `record_error` (reads scoped to one airline; rows carry the queue's raw status) | Procrastinate defer + SQL on `job_records ⋈ procrastinate_jobs` | Job queue (API), fuel service (worker) |
-| Procrastinate connector (the library's own seam) | `PsycopgConnector` / `SyncPsycopgConnector`; `InMemoryConnector` in tests | Job queue |
-| `FileModelRepository`: `load(airline, version)`, concrete; the Protocol lands with a second source (§10) | JSON file under `OPTIFUEL_MODEL_DIR` | Worker startup: loads its airline's model once and hands it to the fuel service |
-| `WeatherClient`: `winds(points)` | HTTP client, bearer token, 5 s timeout: `POST /winds` `{"points": [{latitude, longitude, altitude_ft, eta}]}` → `{"winds": [{speed_kt, from_deg}]}` | Fuel service (worker) |
-| `Clock`: `now()` | `datetime.now(UTC)` | Job queue and fuel service |
+| `JobStore` | SQL on `job_records ⋈ procrastinate_jobs` | Dict over Procrastinate's `InMemoryConnector` |
+| `WeatherClient` | HTTP, bearer token, 5 s timeout, `POST /winds` | Fake returning set winds or errors |
+| `Clock` | `datetime.now(UTC)` | Fixed time |
+| `FileModelRepository` | JSON under `OPTIFUEL_MODEL_DIR` | Temp directory |
 
-The job queue module (`services/jobs.py`) owns everything the queue means: the Procrastinate App
-(`queue_app`), the `fuel_estimate` task and its retry strategy (`register_fuel_estimate`), queue
-naming, the status mapping, plan identity (D13), and the API-side `JobQueue` (submit, get,
-recent, ready). `api.py`, `worker.py`, `cleanup.py` and the tests import it; nothing else
-constructs an App or names a queue. Tests run the real task and retry strategy on Procrastinate's
-`InMemoryConnector`, with the `JobStore` fake composing rows from the connector's jobs; the SQL
-adapter is exercised by the compose and kind smokes only.
+- `services/jobs.py` owns the queue: Procrastinate app, the `fuel_estimate` task and its retries,
+  queue names, status mapping, duplicate detection.
+- `services/tenants.py` owns tenant rules: known airline (401), enabled aircraft (422), model
+  version. Nothing else reads the tenant config.
+- `worker.py` `build()` checks tenant, weather config and model before opening any connection,
+  so fail-fast startup is tested offline.
 
-`worker.py` splits `build(settings)`, which checks tenant, weather config and model and raises
-`WorkerStartupError` without opening a connection, from `Worker.run()`, so the fail-fast contract
-(§5, §8) is tested offline.
+**Extending:**
 
-Tenant rules have one home, the tenant registry (`services/tenants.py`, built from
-`Settings.tenants` at each composition root): `authenticate` (401), `check_aircraft` (422),
-`model_version`, `codes`. `current_airline`, the job service, `/v1/tenants` and worker startup all
-ask it; none reads `Settings.tenants` itself. Concrete, no Protocol: tests configure it through
-`Settings`.
+- New pipeline step (e.g. a route check): one more function call in `FuelService`, raising
+  `FuelEstimateError` to fail the job.
+- New job type: `JobSubmission.type` becomes a discriminated union, plus one `register_<type>`
+  task.
+- New model family: `FuelModel.form` becomes a discriminated union, plus its fuel-flow function.
+- New model source (object storage): `FileModelRepository` gains a `ModelRepository` Protocol.
 
-Job pipeline: `validate → check envelope → fetch winds → integrate → persist`. Each step is a
-plain function. A new filter is one more function in the list. A new job type is one registry
-entry (`type → payload model + Procrastinate task`). A new model family is one loader keyed by
-`form`.
+## 8. Scaling and failures
 
-### Configuration
-
-One `pydantic-settings` class read at startup, the only place environment variables are read:
-
-| Variable | Type | Used by |
-|---|---|---|
-| `OPTIFUEL_ENVIRONMENT` | `dev` / `prod` | all |
-| `OPTIFUEL_DATABASE_URL` | `SecretStr` | all |
-| `OPTIFUEL_TENANTS` | JSON: `{"ABC": {"aircraft_types": ["B777"], "model_version": "2026-09-30"}}` | API, worker |
-| `OPTIFUEL_WORKER_AIRLINE` | airline code | worker |
-| `OPTIFUEL_MODEL_DIR` | path, default `/models` | worker |
-| `OPTIFUEL_WEATHER_URL` | URL | worker |
-| `OPTIFUEL_WEATHER_TOKEN` | `SecretStr` | worker |
-| `OPTIFUEL_RETENTION_DAYS` | int, default 30 | cleanup |
-
-Secrets come from a Kubernetes Secret (Helm) or `.env` (compose). Nothing secret goes in
-ConfigMaps.
-
-### Processes (one image)
-
-| Process | Command | Kubernetes object |
-|---|---|---|
-| API | `uvicorn --factory src.api:from_env` (image default) | Deployment + Service + HPA (CPU) |
-| Worker | `python -m src.worker` | Deployment per airline + KEDA ScaledObject |
-| Migrate | `python -m src.migrate` | Job, Helm `pre-install,pre-upgrade` hook |
-| Cleanup | `python -m src.cleanup` | CronJob `*/5 * * * *` |
-
-- **Migrate** applies the Procrastinate schema if it's absent, then `job_records` DDL
-  (`IF NOT EXISTS`). `ponytail:` no migration tool; Procrastinate upgrades need its versioned
-  migration scripts, which is the point to adopt one.
-- **Cleanup** retries jobs from workers whose heartbeat went stale (`get_stalled_jobs` →
-  `retry_job`), then `delete_old_jobs` older than `RETENTION_DAYS`, including failed ones.
-
-## 8. Scaling and resilience
-
-KEDA, per airline, rendered from `tenants`:
-
-```yaml
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata: {name: optifuel-worker-abc}
-spec:
-  scaleTargetRef: {name: optifuel-worker-abc}
-  minReplicaCount: 1        # per-tenant value; 0 allowed at the cost of a cold start
-  maxReplicaCount: 10
-  triggers:
-    - type: postgresql
-      metadata:
-        query: >-
-          SELECT count(*) FROM procrastinate_jobs
-          WHERE queue_name = 'airline.ABC' AND status IN ('todo', 'doing')
-        targetQueryValue: "10"
-      authenticationRef: {name: optifuel-postgres}
-```
-
-With `keda.enabled=false`, workers run `minReplicaCount` replicas. The API scales on CPU (HPA); it
-is stateless.
+Each airline gets a KEDA `ScaledObject` (rendered from `tenants`) that counts its `todo` and
+`doing` jobs, with a target of 10 per replica. With `keda.enabled=false`, workers run at
+`minReplicas`. The stateless API scales on CPU.
 
 | Failure | Behaviour |
 |---|---|
-| Worker crashes mid-job | Heartbeat goes stale after 30 s; cleanup requeues and `attempts` counts the lost try. `ponytail:` a job that kills its worker every time is requeued every run; fail stalled jobs past the retry cap if that shows up |
-| Weather API down or slow | 5 s timeout, retried with backoff, `failed` after 3 attempts with the error kept |
-| Postgres down | `/ready` fails so the API is taken out of the Service; workers reconnect; queued work survives |
-| Bad or missing model | Worker fails fast at startup (CrashLoopBackOff, visible); jobs wait queued |
-| Traffic burst | Jobs queue in Postgres; KEDA adds workers for that airline only |
-| Duplicate submissions | Same job returned (§3) |
+| Worker crashes mid-job | Heartbeat stale after 30 s; cleanup requeues it. Limitation: a job that kills its worker every time is requeued every run; cap it if that shows up |
+| Weather API down or slow | 5 s timeout, retried, `failed` after 3 attempts with the error kept |
+| Postgres down | `/ready` fails, API leaves the Service; workers reconnect; queued jobs survive |
+| Bad or missing model | Worker fails at startup (CrashLoopBackOff); jobs wait queued |
+| Traffic burst | Jobs queue; KEDA adds workers for that airline only |
+| Duplicate submission | Queued job's id returned (D13) |
 
-Production Postgres is managed (RDS / Cloud SQL) with backups and a standby; add PgBouncer when the
+Production Postgres is managed (RDS / Cloud SQL) with backups and a standby; add PgBouncer when
 worker count pushes connection limits.
 
-## 9. Frontend
-
-`src/static/`, served at `/`: `index.html` (markup), `style.css`, `app.js`. No framework,
-no build:
-
-- Airline selector (from `GET /v1/tenants`), sent as `X-Airline`; the page's accent colour follows
-  the airline.
-- JSON textarea pre-filled with an in-envelope sample plan, and a Submit button. A route chart,
-  altitude profile and plan summary redraw from the textarea as it is edited (display only; the
-  server still validates).
-- Jobs table (`GET /v1/jobs?limit=100`, the list cap), refreshed every 2 s: id, flight, status,
-  attempts, fuel or error, with status counts and total fuel for those last 100 jobs, not
-  all-time. Opening a job shows its cached row at once, fetches `GET /v1/jobs/{id}`, and keeps
-  refreshing with the poll.
-- Controls have labels and the table has headers; status is text, not colour only. Animations
-  stop under `prefers-reduced-motion`.
-
-## 10. Not now, and the trigger
+## 9. Not now
 
 | Item | Trigger |
 |---|---|
-| Real auth (OIDC at the gateway, airline claim) | Any exposure beyond the demo; swap the `current_airline` dependency |
-| Row-level security / database per airline | Contractual or audit requirement on data isolation |
-| Object storage + workload identity for models | Models beyond ConfigMap size (1 MiB) or managed by a training pipeline; new `ModelRepository` implementation |
+| Real auth (OIDC at the gateway) | Any exposure beyond the demo |
+| Row-level security, database per airline | Contract or audit requirement |
+| Object storage for models | Models over 1 MiB (ConfigMap limit) or produced by a training pipeline |
 | Webhooks / SSE | Airlines asking for push; Postgres `LISTEN/NOTIFY` feeds it |
-| Kafka | See D3 triggers |
-| Prometheus metrics (queue depth, job latency per airline) and OpenTelemetry traces | First production environment |
+| Kafka | See §2 |
+| Prometheus metrics, OpenTelemetry traces | First production environment |
 | Weather cache | Weather API rate limits or cost |
 | Job cancel endpoint | Long-running job types |
-
-## 11. Packaging
-
-One image ships every process (§7). Two ways to run it:
-
-- **docker compose** (`docker-compose.yaml`, local): postgres (official image, tag + digest),
-  migrate (one-shot), api, worker-abc and worker-xyz (each mounts only its own model directory),
-  cleanup (a 5-minute loop standing in for the CronJob), a WireMock weather stub
-  (`deploy/weather-stub/`), and seed (one-shot, `scripts/seed.py` mounted since dev tooling stays
-  out of the image): a fake `DEMO` tenant with no model or worker, holding one job in each status
-  so the page shows them all.
-- **Helm** (`deploy/helm/optifuel`): API Deployment + Service + HPA, per-tenant worker Deployment +
-  model ConfigMap + ScaledObject (`keda.enabled`), migrate hook Job, cleanup CronJob, Secret
-  references. The Secret (`database-url`, `weather-token`) is created outside the chart. Model
-  files and the stub mapping enter with `--set-file`, since a chart reads no file outside its
-  directory. No Ingress template: the cluster's ingress fronts `optifuel-api`.
-  `values-kind.yaml` enables an in-chart Postgres StatefulSet, installed as a `pre-install` hook
-  so it exists before the migrate hook, and the WireMock stub; `scripts/kind-smoke.sh` exercises
-  the chart end to end on kind (§8 behaviours: backlog scaling, worker death mid-job, KEDA off).
+| Migration tool | First Procrastinate schema upgrade |
