@@ -20,6 +20,15 @@ def r2(y: npt.ArrayLike, pred: npt.ArrayLike) -> float:
     return float(1 - np.sum((y - pred) ** 2) / np.sum((y - y.mean()) ** 2))
 
 
+def std_errors(columns: Sequence[npt.ArrayLike], y: npt.ArrayLike) -> np.ndarray:
+    """OLS standard errors, intercept last. Assumes independent errors: points of one flight may
+    share sensor error, so treat these as a lower bound."""
+    x, y = design(columns), np.asarray(y)
+    residual = y - x @ fit(columns, y)
+    sigma2 = residual @ residual / (len(y) - x.shape[1])
+    return np.sqrt(sigma2 * np.diag(np.linalg.inv(x.T @ x)))
+
+
 def split_by_flight(points: pd.DataFrame, seed: int = 0) -> tuple[pd.DataFrame, pd.DataFrame]:
     """80/20 split on whole flights: points of one flight share sensors, a point split leaks."""
     flights = points.flight.unique()

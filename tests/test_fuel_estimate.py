@@ -35,7 +35,7 @@ def test_estimates_route_fuel(
     assert job["flight_id"] == 123
     assert job["error"] is None
     assert job["result"] == {
-        "total_fuel_lb": pytest.approx(3.98041, rel=1e-5),
+        "total_fuel_lb": pytest.approx(3.98153, rel=1e-5),
         "distance_km": pytest.approx(222.373, rel=1e-5),
         "duration_h": pytest.approx(1.29716, rel=1e-5),
         "model_version": "2026-09-30",

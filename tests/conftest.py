@@ -24,7 +24,7 @@ ABC_MODEL = FuelModel.model_validate(
         "airline": "ABC",
         "version": "2026-09-30",
         "form": "power_law",
-        "coefficients": {"ln_c": 12.75644, "speed": 0.99981, "altitude": -1.99903},
+        "coefficients": {"ln_c": 12.75604, "speed": 1.00009, "altitude": -1.99912},
         "envelope": {"speed_kmh": [24, 238], "altitude_ft": [1000, 10000]},
     }
 )
