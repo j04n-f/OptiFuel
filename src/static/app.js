@@ -98,7 +98,7 @@ function preview(animate = false) {
     return;
   }
   const payload = body?.payload ?? {};
-  const points = (Array.isArray(payload.waypoints) ? payload.waypoints : []).filter(
+  const points = (Array.isArray(payload.route) ? payload.route : []).filter(
     (w) => Number.isFinite(w?.latitude) && Number.isFinite(w?.longitude),
   );
   const legs = points.slice(1).map((w, i) => km(points[i], w));

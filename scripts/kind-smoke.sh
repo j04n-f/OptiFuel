@@ -86,7 +86,7 @@ submit() {
   curl -fsS -H 'X-Airline: ABC' -H 'Content-Type: application/json' "$API/v1/jobs" -d '{
     "type": "fuel_estimate",
     "payload": {"airline": "ABC", "aircraft_type": "B777", "registration": "EC-ABC",
-                "flight_id": '"$1"', "waypoints": [
+                "flight_id": '"$1"', "route": [
                   {"latitude": 41.3, "longitude": 2.1, "speed": 200, "altitude": 5000},
                   {"latitude": 41.8, "longitude": 3.0, "speed": 180, "altitude": 4000}]}}' |
     jq -r .id

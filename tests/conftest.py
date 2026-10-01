@@ -47,7 +47,7 @@ def flight_plan(*waypoints: dict[str, float], **overrides: object) -> dict[str, 
             "registration": "EC-ABC",
             "flight_id": 123,
             "departure_time": DEPARTURE.isoformat(),
-            "waypoints": list(waypoints),
+            "route": list(waypoints),
             **overrides,
         },
     }

@@ -33,7 +33,7 @@ class FlightPlan(BaseModel):
     departure_time: UtcDatetime | None = Field(
         default=None, description="Defaults to the time the job is received"
     )
-    waypoints: list[Waypoint] = Field(min_length=2)
+    route: list[Waypoint] = Field(min_length=2)
 
 
 class JobSubmission(BaseModel):

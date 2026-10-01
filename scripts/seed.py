@@ -46,7 +46,7 @@ def plan(flight_id: int, departure: datetime) -> FlightPlan:
         registration="EC-DMO",
         flight_id=flight_id,
         departure_time=departure,
-        waypoints=[
+        route=[
             Waypoint(latitude=41.3, longitude=2.1, speed=200, altitude=5000),
             Waypoint(latitude=41.8, longitude=3.0, speed=180, altitude=4000),
         ],

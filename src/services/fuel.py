@@ -33,7 +33,7 @@ class FuelService:
             if plan.departure_time is None:
                 raise ValueError("departure_time is set by JobService.submit before queueing")
 
-            result = self._estimate(plan.waypoints, plan.departure_time)
+            result = self._estimate(plan.route, plan.departure_time)
         except Exception as error:
             # Every failed attempt, transient too: a job that exhausts its retries keeps its cause.
             message = (
