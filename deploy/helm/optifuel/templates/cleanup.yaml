@@ -20,6 +20,7 @@ spec:
             {{- include "optifuel.labels" $cleanup | nindent 12 }}
         spec:
           restartPolicy: Never
+          {{- include "optifuel.podSecurity" . | nindent 10 }}
           containers:
             - name: cleanup
               {{- include "optifuel.image" . | nindent 14 }}

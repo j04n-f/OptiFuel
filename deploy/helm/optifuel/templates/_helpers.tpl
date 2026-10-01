@@ -28,6 +28,14 @@ securityContext:
     drop: [ALL]
 {{- end }}
 
+{{/* Pod level: nothing here talks to the Kubernetes API, so a mounted token is only attack surface. */}}
+{{- define "optifuel.podSecurity" -}}
+automountServiceAccountToken: false
+securityContext:
+  seccompProfile:
+    type: RuntimeDefault
+{{- end }}
+
 {{- define "optifuel.secretEnv" -}}
 - name: {{ .env }}
   valueFrom:

@@ -114,7 +114,7 @@ def test_headwind_raises_fuel_over_calm_air(
         pytest.param(
             flight_plan(IN_ENVELOPE, IN_ENVELOPE),
             [ValueError("malformed weather reply")],
-            "ValueError: malformed weather reply",
+            "internal_error",
             True,
             id="bad weather reply",
         ),
@@ -175,7 +175,7 @@ def test_fails_after_three_attempts_while_weather_is_unavailable(
     assert job["status"] == "failed"
     assert job["attempts"] == 3
     assert job["result"] is None
-    assert job["error"] == "WeatherUnavailableError: weather API answered 504"
+    assert job["error"] == "weather_unavailable"
     assert len(weather.calls) == 3
 
 
@@ -207,6 +207,7 @@ ABC = {"X-Airline": "ABC"}
         pytest.param(ABC, flight_plan(V, V, aircraft_type="A320"), 422, id="aircraft disabled"),
         pytest.param(ABC, {**flight_plan(V, V), "type": "other"}, 422, id="unknown job type"),
         pytest.param(ABC, flight_plan(V), 422, id="one waypoint"),
+        pytest.param(ABC, flight_plan(*[V] * 501), 422, id="501 waypoints"),
         pytest.param(ABC, flight_plan(V, {**V, "latitude": 90.1}), 422, id="latitude"),
         pytest.param(ABC, flight_plan(V, {**V, "longitude": -180.1}), 422, id="longitude"),
         pytest.param(ABC, flight_plan(V, {**V, "speed": 0}), 422, id="speed"),

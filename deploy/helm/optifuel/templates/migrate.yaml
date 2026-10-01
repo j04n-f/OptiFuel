@@ -18,6 +18,7 @@ spec:
         {{- include "optifuel.labels" $migrate | nindent 8 }}
     spec:
       restartPolicy: Never
+      {{- include "optifuel.podSecurity" . | nindent 6 }}
       {{- if .Values.postgres.enabled }}
       # In-chart Postgres is a hook created just before this Job; wait until it accepts.
       initContainers:

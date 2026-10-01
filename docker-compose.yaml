@@ -49,7 +49,8 @@ services:
   api:
     <<: *app
     restart: unless-stopped
-    ports: ["8000:8000"]
+    # Loopback only: the header is the credential (D9), so a LAN peer would be any airline.
+    ports: ["127.0.0.1:8000:8000"]
 
   # Each worker mounts only its own airline's model directory.
   worker-abc:

@@ -18,6 +18,25 @@ spec:
     - name: postgres
       port: 5432
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-postgres-init
+  labels:
+    {{- include "optifuel.labels" $postgres | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install
+    helm.sh/hook-weight: "-10"
+data:
+  # Runs once, on an empty data directory. The default privilege covers the tables migrate
+  # creates later as `optifuel`; `keda` only ever counts `procrastinate_jobs`.
+  keda.sh: |
+    set -eu
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<EOSQL
+    CREATE ROLE keda LOGIN PASSWORD '$KEDA_PASSWORD';
+    ALTER DEFAULT PRIVILEGES FOR ROLE optifuel IN SCHEMA public GRANT SELECT ON TABLES TO keda;
+    EOSQL
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -38,6 +57,7 @@ spec:
       labels:
         {{- include "optifuel.labels" $postgres | nindent 8 }}
     spec:
+      {{- include "optifuel.podSecurity" . | nindent 6 }}
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}
@@ -50,8 +70,17 @@ spec:
             - name: POSTGRES_DB
               value: optifuel
             {{- include "optifuel.secretEnv" (dict "root" $ "env" "POSTGRES_PASSWORD" "key" "postgres-password") | nindent 12 }}
+            {{- include "optifuel.secretEnv" (dict "root" $ "env" "KEDA_PASSWORD" "key" "keda-password") | nindent 12 }}
+          volumeMounts:
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
           readinessProbe:
             exec:
               command: [pg_isready, -U, optifuel]
             periodSeconds: 2
+      volumes:
+        - name: init
+          configMap:
+            name: {{ .Release.Name }}-postgres-init
 {{- end }}

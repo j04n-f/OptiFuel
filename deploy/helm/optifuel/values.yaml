@@ -9,8 +9,9 @@ image:
 
 environment: prod
 
-# Existing Secret (keys `database-url`, `weather-token`, plus `postgres-password` for in-chart
-# Postgres). KEDA connects with `database-url` from its own namespace: use a full hostname.
+# Existing Secret. Keys: `database-url`; `keda-database-url`, a role with SELECT on
+# `procrastinate_jobs` only, read by KEDA from its own namespace (use a full hostname);
+# `weather-token`; for in-chart Postgres also `postgres-password` and `keda-password`.
 secret:
   name: optifuel
 

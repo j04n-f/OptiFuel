@@ -33,7 +33,8 @@ class FlightPlan(BaseModel):
     departure_time: UtcDatetime | None = Field(
         default=None, description="Defaults to the time the job is received"
     )
-    route: list[Waypoint] = Field(min_length=2)
+    # Cap: one weather call per waypoint, and the plan is stored as queue args.
+    route: list[Waypoint] = Field(min_length=2, max_length=500)
 
 
 class JobSubmission(BaseModel):

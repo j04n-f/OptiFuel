@@ -61,10 +61,14 @@ kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
 # Created once: Postgres keeps the password it was initialised with.
 if ! kubectl -n "$NS" get secret optifuel >/dev/null 2>&1; then
   password=$(openssl rand -hex 16)
-  # Fully qualified: KEDA's operator reads this URL too, from its own namespace.
+  keda_password=$(openssl rand -hex 16)
+  # Fully qualified: KEDA's operator reads its URL from its own namespace.
+  pg=optifuel-postgres.$NS.svc:5432/optifuel?sslmode=disable
   kubectl -n "$NS" create secret generic optifuel \
-    --from-literal=database-url="postgresql://optifuel:$password@optifuel-postgres.$NS.svc:5432/optifuel?sslmode=disable" \
+    --from-literal=database-url="postgresql://optifuel:$password@$pg" \
+    --from-literal=keda-database-url="postgresql://keda:$keda_password@$pg" \
     --from-literal=postgres-password="$password" \
+    --from-literal=keda-password="$keda_password" \
     --from-literal=weather-token=kind-token
 fi
 helm upgrade --install optifuel "$CHART" --namespace "$NS" -f "$CHART/values-kind.yaml" \

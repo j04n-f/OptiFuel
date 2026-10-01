@@ -4,7 +4,7 @@ from itertools import pairwise
 from math import asin, atan2, cos, degrees, exp, radians, sin, sqrt
 
 from src.clients.clock import Clock
-from src.clients.weather import WeatherClient, Wind, WindQuery
+from src.clients.weather import WeatherClient, WeatherUnavailableError, Wind, WindQuery
 from src.repositories.protocols import JobStore
 from src.schemas import FlightPlan, FuelModel, FuelResult, Waypoint
 
@@ -36,12 +36,7 @@ class FuelService:
             result = self._estimate(plan.route, plan.departure_time)
         except Exception as error:
             # Every failed attempt, transient too: a job that exhausts its retries keeps its cause.
-            message = (
-                str(error)
-                if isinstance(error, FuelEstimateError)
-                else f"{type(error).__name__}: {error}"
-            )
-            self._store.record_error(job_id, message, self._clock.now())
+            self._store.record_error(job_id, public_error(error), self._clock.now())
             raise
         self._store.record_success(job_id, result, self._clock.now())
 
@@ -56,6 +51,17 @@ class FuelService:
         ]
 
         return integrate(self._model, waypoints, self._weather.winds(queries))
+
+
+def public_error(error: Exception) -> str:
+    """What the tenant reads in `error`. Only `FuelEstimateError` text is ours; other exceptions
+    quote URLs, hosts or upstream bodies, so they become one word and the traceback stays in
+    the worker log, where Procrastinate writes every failed attempt."""
+    if isinstance(error, FuelEstimateError):
+        return str(error)
+    if isinstance(error, WeatherUnavailableError):
+        return "weather_unavailable"
+    return "internal_error"
 
 
 def outside_envelope(model: FuelModel, waypoints: Sequence[Waypoint]) -> list[int]:

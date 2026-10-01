@@ -26,6 +26,7 @@ spec:
       labels:
         {{- include "optifuel.labels" $weather | nindent 8 }}
     spec:
+      {{- include "optifuel.podSecurity" . | nindent 6 }}
       containers:
         - name: weather
           image: {{ .Values.weatherStub.image }}

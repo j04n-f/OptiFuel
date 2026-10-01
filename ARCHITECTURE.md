@@ -108,7 +108,10 @@ stateDiagram-v2
 - **Rejected before queueing**: see the README's API section (401, 403, 422).
 - **Duplicates** (D13): `plan_key = sha256(payload)`, hashed before `departure_time` defaults.
   While a job with lock `{airline}:{plan_key}` is queued, the API returns that job's id.
-- A failed job keeps its last error. Resubmitting creates a new job.
+- A failed job keeps its last error. Permanent errors spell the cause (`out_of_envelope: ...`);
+  a transient one ends as `weather_unavailable`, anything unexpected as `internal_error`, since
+  exception text quotes URLs and upstream bodies. The traceback is in the worker log.
+  Resubmitting creates a new job.
 
 ```mermaid
 sequenceDiagram

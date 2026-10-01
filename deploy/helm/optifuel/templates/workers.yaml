@@ -41,6 +41,7 @@ spec:
         # The worker reads its model once, at startup: a new model rolls the pods.
         checksum/model: {{ $model | sha256sum }}
     spec:
+      {{- include "optifuel.podSecurity" $ | nindent 6 }}
       containers:
         - name: worker
           {{- include "optifuel.image" $ | nindent 10 }}
@@ -98,8 +99,9 @@ metadata:
   labels:
     {{- include "optifuel.labels" (dict "root" $ "component" "keda") | nindent 4 }}
 spec:
+  # Read-only role: the KEDA operator holds this URL in its own namespace.
   secretTargetRef:
     - parameter: connection
       name: {{ .Values.secret.name }}
-      key: database-url
+      key: keda-database-url
 {{- end }}

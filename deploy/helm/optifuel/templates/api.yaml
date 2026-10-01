@@ -15,6 +15,7 @@ spec:
       labels:
         {{- include "optifuel.labels" $api | nindent 8 }}
     spec:
+      {{- include "optifuel.podSecurity" . | nindent 6 }}
       containers:
         - name: api
           {{- include "optifuel.image" . | nindent 10 }}
