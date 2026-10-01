@@ -54,11 +54,15 @@ class HttpWeatherClient:
 
     def winds(self, points: Sequence[WindQuery]) -> list[Wind]:
         body = {"points": _POINTS.dump_python(list(points), mode="json")}
+
         try:
             response = self._http.post("/winds", json=body)
         except httpx2.TransportError as error:
             raise WeatherUnavailableError(f"weather API unreachable: {error}") from error
+
         if response.is_server_error:
             raise WeatherUnavailableError(f"weather API answered {response.status_code}")
+
         response.raise_for_status()
+
         return _WindsReply.model_validate_json(response.content).winds

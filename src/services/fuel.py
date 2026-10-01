@@ -32,6 +32,7 @@ class FuelService:
         try:
             if plan.departure_time is None:
                 raise ValueError("departure_time is set by JobService.submit before queueing")
+
             result = self._estimate(plan.waypoints, plan.departure_time)
         except Exception as error:
             # Every failed attempt, transient too: a job that exhausts its retries keeps its cause.
@@ -48,10 +49,12 @@ class FuelService:
         # Before the weather call: extrapolating the model could underestimate fuel.
         if outside := outside_envelope(self._model, waypoints):
             raise FuelEstimateError(f"out_of_envelope: waypoints {', '.join(map(str, outside))}")
+
         queries = [
             WindQuery(w.latitude, w.longitude, w.altitude, eta)
             for w, eta in zip(waypoints, etas(waypoints, departure), strict=True)
         ]
+
         return integrate(self._model, waypoints, self._weather.winds(queries))
 
 
@@ -68,25 +71,31 @@ def etas(waypoints: Sequence[Waypoint], departure: datetime) -> list[datetime]:
     # ponytail: still-air ETAs, so wind lookups are approximate. Iterate once with ground-speed
     # ETAs if forecast error matters.
     times = [departure]
+
     for a, b in pairwise(waypoints):
         times.append(times[-1] + timedelta(hours=distance_km(a, b) / a.speed))
+
     return times
 
 
 def integrate(model: FuelModel, waypoints: Sequence[Waypoint], winds: Sequence[Wind]) -> FuelResult:
     """Sum of fuel flow * segment time; segment i flies at waypoint i's airspeed, altitude, wind."""
     fuel = distance = duration = 0.0
+
     # The last waypoint's wind has no segment after it; strict catches a short weather reply.
     for i, ((a, b), wind) in enumerate(zip(pairwise(waypoints), winds[:-1], strict=True)):
         d = distance_km(a, b)
         headwind = KMH_PER_KT * wind.speed_kt * cos(radians(wind.from_deg - bearing_deg(a, b)))
         ground_speed = a.speed - headwind
+
         if ground_speed <= 0:
             raise FuelEstimateError(f"non_positive_ground_speed: waypoint {i}")
+
         hours = d / ground_speed
         fuel += fuel_flow(model, a) * hours
         distance += d
         duration += hours
+
     return FuelResult(
         total_fuel_lb=fuel, distance_km=distance, duration_h=duration, model_version=model.version
     )

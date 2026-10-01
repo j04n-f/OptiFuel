@@ -33,6 +33,7 @@ class PostgresJobStore:
                 conn.execute("SELECT 1")
         except psycopg.Error:
             return False
+
         return True
 
     def submit(
@@ -45,11 +46,13 @@ class PostgresJobStore:
         queueing_lock: str,
     ) -> int:
         plan = submission.payload
+
         # `connection=conn` runs the defer on this connection, inside this transaction (D3).
         with self._pool.connection() as conn, conn.transaction():
             job_id = self._queue.configure_task(
                 submission.type, queue=queue, queueing_lock=queueing_lock, connection=conn
             ).defer(flight_plan=plan.model_dump(mode="json"))
+
             conn.execute(
                 """
                 INSERT INTO job_records
@@ -58,6 +61,7 @@ class PostgresJobStore:
                 """,
                 (job_id, plan.airline, submission.type, plan.flight_id, plan_key, submitted_at),
             )
+
         return job_id
 
     def get(self, airline: str, job_id: int) -> JobRow | None:

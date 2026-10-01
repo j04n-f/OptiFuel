@@ -13,13 +13,16 @@ async def cleanup(settings: Settings) -> None:
     queue = queue_app(
         procrastinate.PsycopgConnector(conninfo=settings.database_url.get_secret_value())
     )
+
     async with queue.open_async():
         jobs = queue.job_manager
+
         # Stalled: running on a worker whose heartbeat is over 30 s old. ponytail: requeued
         # however often they stall; fail them past the retry cap if a job keeps killing workers.
         for job in await jobs.get_stalled_jobs():
             await jobs.retry_job(job)
             logger.info("requeued stalled job_id=%s queue=%s", job.id, job.queue)
+
         # Failed jobs too, so dead letters don't pile up; ON DELETE CASCADE drops their records.
         await jobs.delete_old_jobs(nb_hours=settings.retention_days * 24, include_failed=True)
 

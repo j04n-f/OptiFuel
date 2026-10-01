@@ -72,16 +72,21 @@ class JobQueue:
 
     def submit(self, airline: str, submission: JobSubmission) -> int:
         plan = submission.payload
+
         if plan.airline != airline:
             raise AirlineMismatchError(f"plan airline {plan.airline!r} is not {airline!r}")
+
         self._tenants.check_aircraft(airline, plan.aircraft_type)
+
         # Hashed before departure_time defaults, so a retried POST without one finds its job.
         plan_key = sha256(submission.model_dump_json().encode()).hexdigest()
         now = self._clock.now()
+
         if plan.departure_time is None:
             # Received time, not worker pick-up time: queue latency would shift every ETA.
             plan = plan.model_copy(update={"departure_time": now})
             submission = submission.model_copy(update={"payload": plan})
+
         try:
             return self._store.submit(
                 submission,
@@ -93,8 +98,10 @@ class JobQueue:
         except AlreadyEnqueued:
             # Duplicate submission (D13): the same plan is still queued, so that job is the answer.
             queued = self._store.queued(airline, plan_key)
+
             if queued is None:
                 raise
+
             return queued.id
 
     def get(self, airline: str, job_id: int) -> JobView | None:

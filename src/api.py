@@ -25,7 +25,9 @@ def create_app(settings: Settings) -> FastAPI:
         open=False,
         check=ConnectionPool.check_connection,
     )
+
     queue = queue_app(procrastinate.SyncPsycopgConnector())
+
     registry = Tenants(settings.tenants)
 
     @asynccontextmanager
@@ -39,13 +41,17 @@ def create_app(settings: Settings) -> FastAPI:
             pool.close()
 
     app = FastAPI(title="OptiFuel", lifespan=lifespan)
+
     app.state.tenants = registry
     app.state.jobs = JobQueue(PostgresJobStore(pool, queue), SystemClock(), registry)
+
     app.include_router(health.router)
     app.include_router(jobs.router)
     app.include_router(tenants.router)
+
     # Mounted last: routes match in order, so the catch-all "/" never shadows the API.
     app.mount("/", StaticFiles(packages=[("src", "static")], html=True))
+
     return app
 
 

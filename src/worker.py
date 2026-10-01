@@ -35,13 +35,17 @@ class Worker:
 def build(settings: Settings) -> Worker:
     """Worker for `OPTIFUEL_WORKER_AIRLINE`: its queue, its model, nothing else. Opens nothing."""
     tenants = Tenants(settings.tenants)
+
     try:
         airline = tenants.authenticate(settings.worker_airline)
     except UnknownAirlineError as error:
         raise WorkerStartupError(f"OPTIFUEL_WORKER_AIRLINE: {error}") from error
+
     if settings.weather_url is None or settings.weather_token is None:
         raise WorkerStartupError("OPTIFUEL_WEATHER_URL and OPTIFUEL_WEATHER_TOKEN are required")
+
     version = tenants.model_version(airline)
+
     try:
         # Fail fast: without its own model the worker never starts, and jobs wait queued.
         model = FileModelRepository(settings.model_dir).load(airline, version)
@@ -49,26 +53,33 @@ def build(settings: Settings) -> Worker:
         raise WorkerStartupError(f"no usable model {version} for {airline}: {error}") from error
 
     url = settings.database_url.get_secret_value()
+
     # One connection: the worker runs one job at a time (Procrastinate's default concurrency).
     pool = ConnectionPool(
         url, min_size=1, max_size=1, open=False, check=ConnectionPool.check_connection
     )
+
     app = queue_app(procrastinate.PsycopgConnector(conninfo=url))
+
     weather = HttpWeatherClient(
         str(settings.weather_url), settings.weather_token.get_secret_value(), httpx2.HTTPTransport()
     )
+
     register_fuel_estimate(
         app, FuelService(model, weather, PostgresJobStore(pool, app), SystemClock())
     )
+
     return Worker(airline, app, pool)
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
     try:
         worker = build(Settings())
     except WorkerStartupError as error:
         sys.exit(str(error))
+
     worker.run()
 
 
