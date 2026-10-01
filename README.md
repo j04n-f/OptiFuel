@@ -75,8 +75,8 @@ OIDC).
 
 Body: `{"type": "fuel_estimate", "payload": <flight plan>}`. A flight plan has `airline`,
 `aircraft_type`, `registration`, `flight_id`, optional `departure_time` (with timezone), and a
-`route` of at least two waypoints `{latitude, longitude, speed, altitude}`: speed is true
-airspeed in km/h, altitude in ft.
+`route` of 2–500 waypoints `{latitude, longitude, speed, altitude}`: speed is true airspeed in
+km/h, altitude in ft.
 
 ```json
 {
@@ -129,6 +129,7 @@ Postgres and KEDA installed. No Ingress template: front `optifuel-api` with the 
 ```sh
 kubectl create secret generic optifuel \
   --from-literal=database-url='postgresql://...' \
+  --from-literal=keda-database-url='postgresql://...' \
   --from-literal=weather-token='...'
 
 helm install optifuel deploy/helm/optifuel -f <values> \
@@ -137,8 +138,9 @@ helm install optifuel deploy/helm/optifuel -f <values> \
   --set-file tenants.ABC.model=models/ABC/2026-09-30.json
 ```
 
-Values: [`values.yaml`](deploy/helm/optifuel/values.yaml). `keda.enabled=false` pins workers at
-their minimum replicas.
+Values: [`values.yaml`](deploy/helm/optifuel/values.yaml). `keda-database-url` is a role with
+`SELECT` on `procrastinate_jobs` only: the KEDA operator holds it in its own namespace, so it
+never gets the app's write access. `keda.enabled=false` pins workers at their minimum replicas.
 
 ### Kind
 
@@ -179,7 +181,7 @@ uv run pre-commit install      # git hooks
 | API with reload | `OPTIFUEL_DATABASE_URL=postgresql://... uv run uvicorn --factory src.api:from_env --reload` |
 | Worker, migrate, cleanup | `uv run python -m src.<worker\|migrate\|cleanup>` with the variables above |
 | Kind smoke / dev | `scripts/kind-smoke.sh`, `scripts/kind-dev.sh` |
-| Exercise 1 notebook | `uv run jupyter lab exercise_1/analysis.ipynb` |
+| Exercise 1 notebook | `uv run jupyter lab exercise_1/analysis.ipynb` (needs the datasets, see below) |
 
 CI (`.github/workflows/ci.yml`) runs four jobs: Lint, Test, Docker, Kind Smoke. Warnings are
 errors; tool config lives in `pyproject.toml`. Dependabot bumps dependencies, actions and images
@@ -209,7 +211,9 @@ exercise_1/       fuel flow analysis
 
 `exercise_1/analysis.ipynb` (outputs committed) finds the fuel flow rule OptiFuel ships. The
 notebook tells the story and explains each statistics idea where it is used; `cleanup.py`,
-`compute.py` and `plot.py` hold the logic.
+`compute.py` and `plot.py` hold the logic. The datasets are not distributed: to rerun, place
+`signals_{fuel_flow,altitude,speed,wind}.pkl` (one DataFrame each, a column per flight, a row
+per time step) in `exercise_1/`; they are gitignored.
 
 1. **Clean**: 4000 rows become 582 points. Drop padding, 7 spikes and 3 flights with broken
    sensors (7, 12, 44); keep one row per steady step, so copies don't count as new evidence.

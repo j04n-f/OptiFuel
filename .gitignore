@@ -10,3 +10,5 @@ htmlcov/
 .ipynb_checkpoints/
 .env
 .DS_Store
+# Exercise 1 datasets are not distributed; a local copy stays local.
+exercise_1/*.pkl

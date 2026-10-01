@@ -3,7 +3,7 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-added-large-files
-        exclude: (\.pkl|uv\.lock)$  # provided datasets, lockfile
+        exclude: ^uv\.lock$
       - id: check-merge-conflict
       - id: check-toml
       - id: check-yaml
